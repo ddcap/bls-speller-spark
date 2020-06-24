@@ -1,0 +1,11 @@
+.bloop/
+.metals/
+project/.bloop/
+src/target
+bin/
+metastore_db/
+target/
+spark-warehouse/
+project/project/
+project/target/
+src/test/resources/bin/*
