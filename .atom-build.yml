@@ -1,0 +1,5 @@
+cmd: sbt assembly
+
+name: "Halvade"
+
+sh: true
