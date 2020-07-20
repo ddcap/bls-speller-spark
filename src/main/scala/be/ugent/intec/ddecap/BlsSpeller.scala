@@ -12,10 +12,13 @@ import org.apache.log4j.Level
 import org.apache.spark.SparkConf;
 import be.ugent.intec.ddecap.tools.Tools;
 import be.ugent.intec.ddecap.rdd.BinaryRDDFunctions._;
+import be.ugent.intec.ddecap.tools.FileUtils._;
+
 
 object BlsSpeller extends Logging {
   case class Config(
       input: String = "",
+      alignmentBased: Boolean = false,
       bindir: String = "",
       output: String = "")
 
@@ -45,7 +48,7 @@ object BlsSpeller extends Logging {
   }
 
   def parseOptionsAndStart(args: Array[String]) : Option[Config] = {
-    val parser = new scopt.OptionParser[Config]("dna-pipeline") {
+    val parser = new scopt.OptionParser[Config]("bls speller") {
       head("BLS Speller", "0.1")
 
       opt[String]('i', "input").action( (x, c) =>
@@ -57,6 +60,9 @@ object BlsSpeller extends Logging {
       opt[String]('b', "bindir").action( (x, c) =>
         c.copy(bindir = x) ).text("Location of the directory containing all binaries.").required()
 
+      opt[Unit]("AB").action( (_, c) =>
+        c.copy(alignmentBased = true) ).text("Alignment based motif discovery.")
+
     }
     parser.parse(args, Config())
   }
@@ -67,10 +73,16 @@ object BlsSpeller extends Logging {
     Timer.startTime()
     var tools = new Tools(config.bindir);
     var families = tools.readOrthologousFamilies(config.input, sc);
-    val motifs = tools.iterateMotifs(families);
 
-    motifs.saveAsBinaryFile(config.output);
+    info("family count: " + families.count);
+    val motifs = tools.iterateMotifs(families, config.alignmentBased, families.count.toInt);
+    motifs.persist(StorageLevel.MEMORY_ONLY);
+    info("motifs found: " + motifs.count());
+    info(Timer.measureTime("motif count"))
 
-    info(Timer.measureTime("BlsSpeller"))
+    // deleteRecursively(config.output);
+    // tools.stringRepresentation(motifs).saveAsTextFile(config.output);
+
+    info(Timer.measureTotalTime("BlsSpeller"))
   }
 }

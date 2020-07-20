@@ -13,13 +13,14 @@ import java.util.concurrent.atomic.AtomicReference
 import org.apache.spark.rdd.RDD
 import scala.io.Codec.string2codec
 import org.apache.log4j.{Level, Logger}
+import scala.collection.mutable.ListBuffer
 
 // based on PipedRDD from Spark!
 class BinaryPipedRDD[T: ClassTag](
     prev: RDD[T],
     command: Seq[String],
     procName: String,
-    var logLevel: Level = null,
+    var logLevel: Level = Level.INFO,
     envVars: Map[String, String] = scala.collection.immutable.Map(),
     separateWorkingDir: Boolean = false)
   extends RDD[Array[Byte]](prev) with be.ugent.intec.ddecap.Logging {
@@ -96,22 +97,20 @@ class BinaryPipedRDD[T: ClassTag](
     val childThreadException = new AtomicReference[Throwable](null)
 
     // Start a thread to print the process's stderr to ours
-    if(logLevel == Level.DEBUG) {
-      new Thread(s"stderr reader for $cmd") {
-        override def run(): Unit = {
-          val err = proc.getErrorStream
-          try {
-            for (line <- Source.fromInputStream(err)(Codec.defaultCharsetCodec.name).getLines) {
-              debug("["+ split.index+ "] " + line)
-            }
-          } catch {
-            case t: Throwable => childThreadException.set(t)
-          } finally {
-            err.close()
+    new Thread(s"stderr reader for $cmd") {
+      override def run(): Unit = {
+        val err = proc.getErrorStream
+        try {
+          for (line <- Source.fromInputStream(err)(Codec.defaultCharsetCodec.name).getLines) {
+            info("["+ split.index+ "] " + line)
           }
+        } catch {
+          case t: Throwable => childThreadException.set(t)
+        } finally {
+          err.close()
         }
-      }.start()
-    }
+      }
+    }.start()
 
     // Start a thread to feed the process input from our parent's iterator
     new Thread(s"stdin writer for $cmd") {
@@ -129,14 +128,61 @@ class BinaryPipedRDD[T: ClassTag](
         } catch {
           case t: Throwable => childThreadException.set(t)
         } finally {
-          debug("["+ split.index+ "] has written " + fsize + " to stdin")
+          info("["+ split.index+ "] has written " + fsize + " to stdin")
           out.close()
         }
       }
     }.start()
 
 //    val lines = Source.fromInputStream(proc.getInputStream)(encoding).getLines
-    val data = org.apache.commons.io.IOUtils.toByteArray(proc.getInputStream)
+val data = org.apache.commons.io.IOUtils.toByteArray(proc.getInputStream)
+
+    // var dataList = ListBuffer[Array[Byte]]();
+    // new Thread(s"stderr reader for $cmd") {
+    //   override def run(): Unit = {
+    //     val stdout = proc.getInputStream
+    //     try {
+    //         val initSize = 128*1024; // 128 kb
+    //         var buf = new Array[Byte](initSize)
+    //         var wordSize = 0;
+    //         var totalSize = 0
+    //         var n = stdout.read(buf, 0, initSize)
+    //         while (n != -1 ) { // -1 marks EOF
+    //           if(n > 0) { // can also be 0 when waiting for data...
+    //             // process data in buf to n
+    //             wordSize = buf(0).toInt
+    //             totalSize =  1 + (if(wordSize % 2 == 0) wordSize else wordSize + 2) + 1
+    //             while(buf.size > 0 && totalSize < buf.size) {
+    //               dataList += buf.take(totalSize)
+    //               buf = buf.drop(totalSize)
+    //               wordSize = buf(0).toInt
+    //               totalSize =  1 + (if(wordSize % 2 == 0) wordSize else wordSize + 2) + 1
+    //             }
+    //
+    //             // increase size of buf to be able to read other data again
+    //             buf = buf.padTo(initSize, 0.toByte);
+    //
+    //             n = stdout.read(buf, buf.size, initSize - buf.size)
+    //           } else {
+    //              Thread.sleep(100)
+    //           }
+    //         }
+    //         //process last buf
+    //         while(buf.size > 0) {
+    //           wordSize = buf(0).toInt
+    //           totalSize =  1 + (if(wordSize % 2 == 0) wordSize else wordSize + 2) + 1
+    //           dataList += buf.take(totalSize)
+    //           buf = buf.drop(totalSize)
+    //         }
+    //     } catch {
+    //       case t: Throwable => childThreadException.set(t)
+    //     } finally {
+    //       stdout.close()
+    //     }
+    //   }
+    // }.start()
+
+
     val exitStatus = proc.waitFor()
 
     // cleanup task working directory if used
@@ -164,5 +210,6 @@ class BinaryPipedRDD[T: ClassTag](
 
     info("["+ split.index+ "] finished " + procName + " in "+(System.nanoTime-time)/1.0e9+"s")
     List(data).iterator
+    // dataList.iterator
   }
 }

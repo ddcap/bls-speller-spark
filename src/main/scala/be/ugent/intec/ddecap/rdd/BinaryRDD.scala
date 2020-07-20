@@ -16,8 +16,11 @@ class BinaryRDDFunctions(rdd: RDD[Array[Byte]]) extends Serializable with Loggin
     rdd.map(x => new String(x.map(_.toChar)) )
   }
 
-  def binSize() : Array[Long] = {
+  def binSizePerPartition() : Array[Long] = {
     rdd.map(x => x.size.toLong).mapPartitions(it => List(it.reduce(_+_)).iterator).collect
+  }
+  def binSize() : Long = {
+    rdd.map(x => x.size.toLong).mapPartitions(it => List(it.reduce(_+_)).iterator).collect.sum
   }
 
   def saveAsBinaryFile(path: String): Long = {
@@ -42,6 +45,7 @@ class BinaryRDDFunctions(rdd: RDD[Array[Byte]]) extends Serializable with Loggin
     rdd.zipWithIndex.map(x => (new LongWritable(x._2), new BytesWritable(x._1)))
        .saveAsSequenceFile(path, codecOpt)
   }
+
 }
 
 object BinaryRDDFunctions {
