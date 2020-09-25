@@ -3,39 +3,67 @@ package be.ugent.intec.ddecap.dna
 import be.ugent.intec.ddecap.dna.BlsVectorFunctions._
 import scala.collection.mutable.ListBuffer
 import be.ugent.intec.ddecap.Logging
+import org.apache.log4j._
 
 @SerialVersionUID(231L)
-class DnaString(val len: Short, val data: Array[Byte]) extends Serializable with Logging {
-  // def canEqual(a: Any) = a.isInstanceOf[Kmer]
-  // override def equals(that: Any): Boolean = {
-  //   that match {
-  //       case that: Kmer => {
-  //           that.canEqual(this) &&
-  //           this.canonical == that.canonical
-  //       }
-  //       case _ => false
-  //   }
-  // }
-  // override def hashCode: Int = {
-  //   canonical.hashCode
-  // }
-  // /**
-  // * Define the implicit ordering as the ordering by the canonical string
-  // */
-  // def compare (that: Kmer) = this.canonical.compare(that.canonical)
-}
-
+case class DnaString(val len: Short, val data: Array[Byte])
 
 object DnaStringFunctions {
-  val numOfThresholds: Short = 6; // TODO add this to function or some other way to set this
+
   private final val byteToAscii = Array(' ', 'A', 'C', 'M', 'G', 'R', 'S', 'V', 'T', 'W', 'Y', 'H', 'K', 'D', 'B', 'N')
-  def readBinaryKeyPair(data: Array[Byte]) : ListBuffer[(DnaString, (DnaString, BlsVector))] = {
-    var list = ListBuffer[(DnaString, (DnaString, BlsVector))]();
-    var i = 0;
-    while ( i < data.size) {
-      // read size of word:
+  val logger = Logger.getLogger(getClass().getName());
+
+  def readBinaryKeyPairs(data: Array[Byte]) : ListBuffer[((DnaString, DnaString), Byte)] = {
+     var list = ListBuffer[((DnaString, DnaString), Byte)]();
+     var i = 0;
+     var wordidx = 0
+     var groupidx = 0
+     while ( i < data.size) {
+       // read size of word:
+       val size = data(i);
+       val bytesForWord =  (size >> 1) + (size & 0x1);
+       i+=1;
+       wordidx = i
+       groupidx = i + bytesForWord
+       i+= 2*bytesForWord + 1;
+       // logger.info("dnastring; " + dnaToString(new DnaString(size, wordData)))
+       // TODO this is not correct -> check the indexes
+       list += (((DnaString(size, data.slice(i- 2*bytesForWord, i)), DnaString(size, data.slice(i-bytesForWord, i ))), data(i-1)))
+     }
+     logger.info("listisze: "  + list.size)
+     return list;
+   }
+   def splitBinaryDataInMotifAndBlsVector(data: List[Byte], wordSize: Int) : (List[Byte], Byte) = {
+     val blsvector = data(wordSize - 1);
+     (data.dropRight(1), blsvector)
+   }
+   def getGroupId(data: List[Byte], wordSize: Int) : List[Byte] = {
+     val newdata = new Array[Byte](wordSize)
+     newdata(0) = data(0)
+     val chars = ListBuffer[Int]()
+     for (d <- 0 to data(0) - 1 ) {
+       if((d & 0x1) == 0)
+         chars += (data(d >> 1) & 0xf)
+       else
+         chars += ((data(d >> 1)>> 4) & 0xf)
+     }
+     var idx = 1
+     var i = 0
+     for (c <- chars.sortBy(x => x)) {
+       if ((i&1) == 0) {
+         newdata(idx) = c.toByte
+       } else {
+         newdata(idx) = (newdata(idx) | (c << 4)).toByte
+         idx += 1
+       }
+       i+= 1
+     }
+     newdata.toList;
+   }
+   def readBinaryKeyPair(data: Array[Byte]) : ((DnaString, DnaString), Byte) = {
+      var i = 0;
       val size = data(i);
-      val bytesForWord = if (size % 2 == 0) size / 2 else size / 2 + 1;
+      val bytesForWord = (size >> 1) + (size & 0x1);
       i+=1;
       val groupData = data.slice(i, i + bytesForWord);
       i+= bytesForWord;
@@ -43,18 +71,19 @@ object DnaStringFunctions {
       i+= bytesForWord;
       val vectorData = data(i)
       i+=1;
-      list += ((new DnaString(size, groupData), (new DnaString(size, wordData), getBlsVectorFromByte(vectorData, numOfThresholds))))
+      // logger.info("dnastring; " + dnaToString(new DnaString(size, wordData)))
+     ((DnaString(size, groupData), DnaString(size, wordData)), vectorData)
     }
-    return list;
-  }
+
 
   def dnaToString(str: DnaString) : String = {
     var ret = "";
     for (i <- 0 to str.len - 1) {
-      if(i % 2 == 0)
+      if(i % 2 == 0) {
         ret += byteToAscii(str.data(i / 2) & 0xf)
-      else
+      } else {
         ret += byteToAscii((str.data(i / 2)  >> 4) & 0xf)
+      }
     }
     ret;
   }

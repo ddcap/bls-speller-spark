@@ -18,9 +18,18 @@ import be.ugent.intec.ddecap.tools.FileUtils._;
 object BlsSpeller extends Logging {
   case class Config(
       input: String = "",
+      partitions: Int = 8,
       alignmentBased: Boolean = false,
       bindir: String = "",
-      output: String = "")
+      output: String = "",
+      backgroundModelCount: Int = 1000,
+      maxDegen: Int = 3,
+      minMotifLen: Int = 6,
+      maxMotifLen: Int = 13,
+      familyCountCutOff: Int = 1,
+      confidenceScoreCutOff: Float = 0.5f,
+      thresholdList: List[Float] = List(0.15f, 0.5f, 0.6f, 0.7f, 0.9f, 0.95f)
+    )
 
   var sc: SparkContext = null
 
@@ -43,7 +52,7 @@ object BlsSpeller extends Logging {
         runPipeline(config)
         sc.stop()
         spark.stop()
-      case None => throw new ClassCastException
+      case None => throw new Exception("arguments missing")
     }
   }
 
@@ -60,6 +69,10 @@ object BlsSpeller extends Logging {
       opt[String]('b', "bindir").action( (x, c) =>
         c.copy(bindir = x) ).text("Location of the directory containing all binaries.").required()
 
+      opt[Int]('p', "partitions").action( (x, c) =>
+        c.copy(partitions = x) ).text("Number of partitions used by executors.").required()
+
+
       opt[Unit]("AB").action( (_, c) =>
         c.copy(alignmentBased = true) ).text("Alignment based motif discovery.")
 
@@ -75,11 +88,17 @@ object BlsSpeller extends Logging {
     var families = tools.readOrthologousFamilies(config.input, sc);
 
     info("family count: " + families.count);
-    val motifs = tools.iterateMotifs(families, config.alignmentBased, families.count.toInt);
+    val motifs = tools.iterateMotifs(families, config.alignmentBased, config.maxDegen, config.minMotifLen, config.maxMotifLen, config.partitions, config.thresholdList.size);
     motifs.persist(StorageLevel.MEMORY_ONLY);
     info("motifs found: " + motifs.count());
     info(Timer.measureTime("motif count"))
 
+    val groupedMotifs = tools.groupMotifsByGroup(motifs, config.maxMotifLen);
+    info("groupedMotifs found: " + groupedMotifs.count());
+    info(Timer.measureTime("grouped motifs count"))
+
+    // val test = tools.processGroups(groupedMotifs, config.thresholdList, config.backgroundModelCount, config.familyCountCutOff, config.confidenceScoreCutOff)
+    // test.collect().foreach(println)
     // deleteRecursively(config.output);
     // tools.stringRepresentation(motifs).saveAsTextFile(config.output);
 

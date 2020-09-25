@@ -20,10 +20,11 @@ class BinaryPipedRDD[T: ClassTag](
     prev: RDD[T],
     command: Seq[String],
     procName: String,
+    motifSize: Int,
     var logLevel: Level = Level.INFO,
     envVars: Map[String, String] = scala.collection.immutable.Map(),
     separateWorkingDir: Boolean = false)
-  extends RDD[Array[Byte]](prev) with be.ugent.intec.ddecap.Logging {
+  extends RDD[List[Byte]](prev) with be.ugent.intec.ddecap.Logging {
 
 
   class NotEqualsFileNameFilter(filterName: String) extends FilenameFilter {
@@ -34,7 +35,7 @@ class BinaryPipedRDD[T: ClassTag](
 
   override def getPartitions: Array[Partition] = firstParent[T].partitions
 
-  override def compute(split: Partition, context: TaskContext): Iterator[Array[Byte]] = {
+  override def compute(split: Partition, context: TaskContext): Iterator[List[Byte]] = {
 
     if(logLevel != null && logLevel != Level.ERROR) {
         Logger.getLogger("be").setLevel(logLevel)
@@ -91,10 +92,62 @@ class BinaryPipedRDD[T: ClassTag](
       }
     }
 
-
     val proc = pb.start()
     val env = SparkEnv.get
     val childThreadException = new AtomicReference[Throwable](null)
+
+
+    // var dataList = ListBuffer[Array[Byte]]();
+    // read output data
+    // new Thread(s"stderr reader for $cmd") {
+    //   override def run(): Unit = {
+    //     val stdout = proc.getInputStream
+    //     try {
+    //         val initSize = 128*1024; //needs to be large enough to not halt the process itself???
+    //         var buf = new Array[Byte](initSize)
+    //         var wordSize : Byte = 0;
+    //         var totalSize = 0
+    //         var idx = 0;
+    //         var offset = 0;
+    //         var arraysize = 0;
+    //
+    //         var n = stdout.read(buf, offset, initSize)
+    //         while (n != -1 ) { // -1 marks EOF
+    //           arraysize = n + offset
+    //           // process data in buf to n
+    //           idx = 0;
+    //           wordSize = buf(idx)
+    //           totalSize = 2 + wordSize + (wordSize & 0x1);  // if it ends with 1 (uneven length) add a byte for
+    //           while(idx + totalSize < arraysize) {
+    //             // dataList += buf.slice(idx, idx + totalSize)
+    //             idx += totalSize
+    //             wordSize = buf(idx)
+    //             totalSize = 2 + wordSize + (wordSize & 0x1); // if it ends with 1 (uneven length) add a byte for
+    //           }
+    //           dataList += buf.slice(0, idx)
+    //           offset = 0
+    //           for(tmp <- idx to arraysize - 1) {
+    //             buf(offset) = buf(tmp)
+    //             offset+=1
+    //           }
+    //           // increase size of buf to be able to read other data again
+    //
+    //           n = stdout.read(buf, offset, initSize - offset)
+    //           while( n == 0) {
+    //             Thread.sleep(10)
+    //             n = stdout.read(buf, offset, initSize - offset)
+    //           }
+    //         }
+    //         dataList += buf.slice(idx, idx + totalSize)
+    //         //process last buf
+    //         info(count + " -> datasize: " + dataList.size);
+    //     } catch {
+    //       case t: Throwable => {childThreadException.set(t);info("error caught " + t)}
+    //     } finally {
+    //       stdout.close()
+    //     }
+    //   }
+    // }.start()
 
     // Start a thread to print the process's stderr to ours
     new Thread(s"stderr reader for $cmd") {
@@ -128,60 +181,14 @@ class BinaryPipedRDD[T: ClassTag](
         } catch {
           case t: Throwable => childThreadException.set(t)
         } finally {
-          info("["+ split.index+ "] has written " + fsize + " to stdin")
+          // info("["+ split.index+ "] has written " + fsize + " to stdin")
           out.close()
         }
       }
     }.start()
 
 //    val lines = Source.fromInputStream(proc.getInputStream)(encoding).getLines
-val data = org.apache.commons.io.IOUtils.toByteArray(proc.getInputStream)
-
-    // var dataList = ListBuffer[Array[Byte]]();
-    // new Thread(s"stderr reader for $cmd") {
-    //   override def run(): Unit = {
-    //     val stdout = proc.getInputStream
-    //     try {
-    //         val initSize = 128*1024; // 128 kb
-    //         var buf = new Array[Byte](initSize)
-    //         var wordSize = 0;
-    //         var totalSize = 0
-    //         var n = stdout.read(buf, 0, initSize)
-    //         while (n != -1 ) { // -1 marks EOF
-    //           if(n > 0) { // can also be 0 when waiting for data...
-    //             // process data in buf to n
-    //             wordSize = buf(0).toInt
-    //             totalSize =  1 + (if(wordSize % 2 == 0) wordSize else wordSize + 2) + 1
-    //             while(buf.size > 0 && totalSize < buf.size) {
-    //               dataList += buf.take(totalSize)
-    //               buf = buf.drop(totalSize)
-    //               wordSize = buf(0).toInt
-    //               totalSize =  1 + (if(wordSize % 2 == 0) wordSize else wordSize + 2) + 1
-    //             }
-    //
-    //             // increase size of buf to be able to read other data again
-    //             buf = buf.padTo(initSize, 0.toByte);
-    //
-    //             n = stdout.read(buf, buf.size, initSize - buf.size)
-    //           } else {
-    //              Thread.sleep(100)
-    //           }
-    //         }
-    //         //process last buf
-    //         while(buf.size > 0) {
-    //           wordSize = buf(0).toInt
-    //           totalSize =  1 + (if(wordSize % 2 == 0) wordSize else wordSize + 2) + 1
-    //           dataList += buf.take(totalSize)
-    //           buf = buf.drop(totalSize)
-    //         }
-    //     } catch {
-    //       case t: Throwable => childThreadException.set(t)
-    //     } finally {
-    //       stdout.close()
-    //     }
-    //   }
-    // }.start()
-
+    val data = org.apache.commons.io.IOUtils.toByteArray(proc.getInputStream)
 
     val exitStatus = proc.waitFor()
 
@@ -209,7 +216,8 @@ val data = org.apache.commons.io.IOUtils.toByteArray(proc.getInputStream)
 
 
     info("["+ split.index+ "] finished " + procName + " in "+(System.nanoTime-time)/1.0e9+"s")
-    List(data).iterator
+    // info("data size: " + dataList.size);
+    data.toList.grouped(motifSize)
     // dataList.iterator
   }
 }
