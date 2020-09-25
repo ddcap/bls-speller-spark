@@ -30,7 +30,7 @@ object DnaStringFunctions {
        // TODO this is not correct -> check the indexes
        list += (((DnaString(size, data.slice(i- 2*bytesForWord, i)), DnaString(size, data.slice(i-bytesForWord, i ))), data(i-1)))
      }
-     logger.info("listisze: "  + list.size)
+     logger.info("listsize: "  + list.size)
      return list;
    }
    def splitBinaryDataInMotifAndBlsVector(data: List[Byte], wordSize: Int) : (List[Byte], Byte) = {

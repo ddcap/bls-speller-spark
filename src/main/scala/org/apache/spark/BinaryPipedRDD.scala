@@ -174,9 +174,9 @@ class BinaryPipedRDD[T: ClassTag](
 //        val out = new PrintWriter(new BufferedWriter(
 //          new OutputStreamWriter(proc.getOutputStream, Codec.defaultCharsetCodec.name), bufferSize))
         try {
-          for (elem <- firstParent[Array[Byte]].iterator(split, context)) {
+          for (elem <- firstParent[List[Byte]].iterator(split, context)) {
             fsize += elem.size
-            out.write(elem)
+            out.write(elem.toArray)
           }
         } catch {
           case t: Throwable => childThreadException.set(t)
