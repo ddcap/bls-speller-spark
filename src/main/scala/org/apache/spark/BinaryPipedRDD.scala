@@ -24,7 +24,7 @@ class BinaryPipedRDD[T: ClassTag](
     var logLevel: Level = Level.INFO,
     envVars: Map[String, String] = scala.collection.immutable.Map(),
     separateWorkingDir: Boolean = false)
-  extends RDD[List[Byte]](prev) with be.ugent.intec.ddecap.Logging {
+  extends RDD[Array[Byte]](prev) with be.ugent.intec.ddecap.Logging {
 
 
   class NotEqualsFileNameFilter(filterName: String) extends FilenameFilter {
@@ -35,7 +35,7 @@ class BinaryPipedRDD[T: ClassTag](
 
   override def getPartitions: Array[Partition] = firstParent[T].partitions
 
-  override def compute(split: Partition, context: TaskContext): Iterator[List[Byte]] = {
+  override def compute(split: Partition, context: TaskContext): Iterator[Array[Byte]] = {
 
     if(logLevel != null && logLevel != Level.ERROR) {
         Logger.getLogger("be").setLevel(logLevel)
@@ -217,7 +217,7 @@ class BinaryPipedRDD[T: ClassTag](
 
     info("["+ split.index+ "] finished " + procName + " in "+(System.nanoTime-time)/1.0e9+"s")
     // info("data size: " + dataList.size);
-    data.toList.grouped(motifSize)
+    data.grouped(motifSize)
     // dataList.iterator
   }
 }

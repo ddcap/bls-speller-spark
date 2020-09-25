@@ -33,9 +33,9 @@ object DnaStringFunctions {
      logger.info("listsize: "  + list.size)
      return list;
    }
-   def splitBinaryDataInMotifAndBlsVector(data: List[Byte], wordSize: Int) : (List[Byte], Byte) = {
+   def splitBinaryDataInMotifAndBlsVector(data: Array[Byte], wordSize: Int) : (List[Byte], Byte) = {
      val blsvector = data(wordSize - 1);
-     (data.dropRight(1), blsvector)
+     (data.dropRight(1).toList, blsvector)
    }
    def getGroupId(data: List[Byte], wordSize: Int) : List[Byte] = {
      val newdata = new Array[Byte](wordSize)
