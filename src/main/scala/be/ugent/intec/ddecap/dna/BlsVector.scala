@@ -4,7 +4,7 @@ import scala.collection.mutable.ListBuffer
 import be.ugent.intec.ddecap.Logging
 
 @SerialVersionUID(232L)
-class BlsVector(var list : ListBuffer[Int]) extends Serializable with Logging {
+class BlsVector(var list : Array[Int]) extends Serializable with Logging {
   def addVector(other: BlsVector) = {
     assert(other.list.length == list.length)
     (list, other.list).zipped.map(_ + _)
@@ -26,11 +26,11 @@ class BlsVector(var list : ListBuffer[Int]) extends Serializable with Logging {
 }
 
 object BlsVectorFunctions {
-  def getBlsVectorFromByte(data: Byte, len: Short) : BlsVector = {
-    var list = ListBuffer[Int]()
+  def getBlsVectorFromByte(data: Byte, len: Int) : BlsVector = {
+    var list = Array[Int](len)
     for (i <- 0 to len - 1) {
-      list += (0x1 & (data >> i)).toShort;
+      list(i) = (0x1 & (data >> i));
     }
-    return new BlsVector(list)
+    return new BlsVector(list.toArray)
   }
 }

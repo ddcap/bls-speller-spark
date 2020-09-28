@@ -97,60 +97,8 @@ class BinaryPipedRDD[T: ClassTag](
     val childThreadException = new AtomicReference[Throwable](null)
 
 
-    // var dataList = ListBuffer[Array[Byte]]();
-    // read output data
-    // new Thread(s"stderr reader for $cmd") {
-    //   override def run(): Unit = {
-    //     val stdout = proc.getInputStream
-    //     try {
-    //         val initSize = 128*1024; //needs to be large enough to not halt the process itself???
-    //         var buf = new Array[Byte](initSize)
-    //         var wordSize : Byte = 0;
-    //         var totalSize = 0
-    //         var idx = 0;
-    //         var offset = 0;
-    //         var arraysize = 0;
-    //
-    //         var n = stdout.read(buf, offset, initSize)
-    //         while (n != -1 ) { // -1 marks EOF
-    //           arraysize = n + offset
-    //           // process data in buf to n
-    //           idx = 0;
-    //           wordSize = buf(idx)
-    //           totalSize = 2 + wordSize + (wordSize & 0x1);  // if it ends with 1 (uneven length) add a byte for
-    //           while(idx + totalSize < arraysize) {
-    //             // dataList += buf.slice(idx, idx + totalSize)
-    //             idx += totalSize
-    //             wordSize = buf(idx)
-    //             totalSize = 2 + wordSize + (wordSize & 0x1); // if it ends with 1 (uneven length) add a byte for
-    //           }
-    //           dataList += buf.slice(0, idx)
-    //           offset = 0
-    //           for(tmp <- idx to arraysize - 1) {
-    //             buf(offset) = buf(tmp)
-    //             offset+=1
-    //           }
-    //           // increase size of buf to be able to read other data again
-    //
-    //           n = stdout.read(buf, offset, initSize - offset)
-    //           while( n == 0) {
-    //             Thread.sleep(10)
-    //             n = stdout.read(buf, offset, initSize - offset)
-    //           }
-    //         }
-    //         dataList += buf.slice(idx, idx + totalSize)
-    //         //process last buf
-    //         info(count + " -> datasize: " + dataList.size);
-    //     } catch {
-    //       case t: Throwable => {childThreadException.set(t);info("error caught " + t)}
-    //     } finally {
-    //       stdout.close()
-    //     }
-    //   }
-    // }.start()
-
     // Start a thread to print the process's stderr to ours
-    new Thread(s"stderr reader for $cmd") {
+    val stderrReaderThread = new Thread(s"stderr reader for $cmd") {
       override def run(): Unit = {
         val err = proc.getErrorStream
         try {
@@ -163,10 +111,11 @@ class BinaryPipedRDD[T: ClassTag](
           err.close()
         }
       }
-    }.start()
+    }
+    stderrReaderThread.start()
 
     // Start a thread to feed the process input from our parent's iterator
-    new Thread(s"stdin writer for $cmd") {
+    val stdinWriterThread = new Thread(s"stdin writer for $cmd") {
       override def run(): Unit = {
         TaskContext.setTaskContext(context)
         var fsize = 0
@@ -185,39 +134,73 @@ class BinaryPipedRDD[T: ClassTag](
           out.close()
         }
       }
-    }.start()
+    }
+    stdinWriterThread.start()
+
+    // interrupts stdin writer and stderr reader threads when the corresponding task is finished.
+    context.addTaskCompletionListener { _ =>
+      if (proc.isAlive) {
+        proc.destroy()
+      }
+
+      if (stdinWriterThread.isAlive) {
+        stdinWriterThread.interrupt()
+      }
+      if (stderrReaderThread.isAlive) {
+        stderrReaderThread.interrupt()
+      }
+    }
 
 //    val lines = Source.fromInputStream(proc.getInputStream)(encoding).getLines
-    val data = org.apache.commons.io.IOUtils.toByteArray(proc.getInputStream)
+    val data = org.apache.commons.io.IOUtils.toByteArray(proc.getInputStream).grouped(motifSize)
 
-    val exitStatus = proc.waitFor()
 
-    // cleanup task working directory if used
-    if (workInTaskDirectory) {
-      scala.util.control.Exception.ignoring(classOf[IOException]) {
-        Utils.deleteRecursively(new File(taskDirectory))
+    new Iterator[Array[Byte]] {
+      def next(): Array[Byte] = {
+        if (!hasNext()) {
+          throw new NoSuchElementException()
+        }
+        data.next()
       }
-      logDebug(s"Removed task working directory $taskDirectory")
-    }
-    if (exitStatus != 0) {
-      error(s"Subprocess exited with status $exitStatus. " +
-        s"Command ran: " + command.mkString(" "))
-      throw new IllegalStateException(s"Subprocess exited with status $exitStatus. " +
-        s"Command ran: " + command.mkString(" "))
-    }
 
-    val t = childThreadException.get()
-    if (t != null) {
-     error(s"Caught exception while running pipe() operator. Command ran: $cmd. " +
-       s"Exception: ${t.getMessage}")
-      proc.destroy()
-      throw t
+      def hasNext(): Boolean = {
+        val result = if (data.hasNext) {
+          true
+        } else {
+          val exitStatus = proc.waitFor()
+          cleanup()
+          if (exitStatus != 0) {
+            error(s"Subprocess exited with status $exitStatus. " +
+              s"Command ran: " + command.mkString(" "))
+            throw new IllegalStateException(s"Subprocess exited with status $exitStatus. " +
+              s"Command ran: " + command.mkString(" "))
+          }
+          info("["+ split.index+ "] finished " + procName + " in "+(System.nanoTime-time)/1.0e9+"s")
+          false
+        }
+        propagateChildException()
+        result
+      }
+      private def cleanup(): Unit = {
+        // cleanup task working directory if used
+        if (workInTaskDirectory) {
+          scala.util.control.Exception.ignoring(classOf[IOException]) {
+            Utils.deleteRecursively(new File(taskDirectory))
+          }
+          logDebug(s"Removed task working directory $taskDirectory")
+        }
+      }
+
+      private def propagateChildException(): Unit = {
+        val t = childThreadException.get()
+        if (t != null) {
+          error(s"Caught exception while running pipe() operator. Command ran: $cmd. " +
+            s"Exception: ${t.getMessage}")
+          proc.destroy()
+          cleanup()
+          throw t
+        }
+      }
     }
-
-
-    info("["+ split.index+ "] finished " + procName + " in "+(System.nanoTime-time)/1.0e9+"s")
-    // info("data size: " + dataList.size);
-    data.grouped(motifSize)
-    // dataList.iterator
   }
 }

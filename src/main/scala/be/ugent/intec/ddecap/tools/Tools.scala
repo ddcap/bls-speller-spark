@@ -13,7 +13,7 @@ import scala.collection.mutable.ArrayBuffer
 import org.apache.log4j.Level
 import org.apache.log4j.Logger
 import org.apache.spark.BinaryPipedRDD
-import be.ugent.intec.ddecap.dna.{DnaString, BlsVector}
+import be.ugent.intec.ddecap.dna.BlsVector
 import be.ugent.intec.ddecap.dna.DnaStringFunctions._
 
 
@@ -21,8 +21,8 @@ import be.ugent.intec.ddecap.dna.DnaStringFunctions._
 class Tools(val bindir: String) extends Serializable with Logging {
   val binary = bindir + "/motifIterator"
   // TODO add options to the tool 3 degen and length range  6- 13, is hard coded right now
-  val AlignmentBasedCommand = binary + " AB - "
-  val AlignmentFreeCommand = binary + " AF - "
+  val AlignmentBasedCommand = " AB "
+  val AlignmentFreeCommand = " AF "
 
   private def tokenize(command: String): Seq[String] = {
     val buf = new ArrayBuffer[String]
@@ -65,15 +65,15 @@ class Tools(val bindir: String) extends Serializable with Logging {
     tmp.repartition(tmp.count.toInt); //  too many partitions for whole file -> repartition based on size???! of the familiy (# characters)
   }
 
-  def getCommand(alignmentBased: Boolean, maxDegen: Int, minMotifLen: Int, maxMotifLen: Int) : Seq[String] = {
-    tokenize( if (alignmentBased) AlignmentBasedCommand else AlignmentFreeCommand + " " + maxDegen + " " + minMotifLen + " " + maxMotifLen)
+  def getCommand(alignmentBased: Boolean, alphabet: Int, maxDegen: Int, minMotifLen: Int, maxMotifLen: Int) : Seq[String] = {
+    tokenize( binary + (if (alignmentBased) AlignmentBasedCommand else AlignmentFreeCommand) + " " + alphabet + " - " + maxDegen + " " + minMotifLen + " " + maxMotifLen)
   }
 
-  def iterateMotifs(input: RDD[String], alignmentBased: Boolean, maxDegen: Int, minMotifLen: Int, maxMotifLen: Int, partitions: Int, thresholdCount: Int) : RDD[(List[Byte], BlsVector)] = {
-    (new org.apache.spark.BinaryPipedRDD(toBinaryFormat(input), getCommand(alignmentBased, maxDegen, minMotifLen, maxMotifLen), "motifIterator", (maxMotifLen >> 1) + 2 ))
+  def iterateMotifs(input: RDD[String], alignmentBased: Boolean, alphabet: Int, maxDegen: Int, minMotifLen: Int, maxMotifLen: Int, partitions: Int, thresholdCount: Int) : RDD[(List[Byte], BlsVector)] = {
+    (new org.apache.spark.BinaryPipedRDD(toBinaryFormat(input), getCommand(alignmentBased, alphabet, maxDegen, minMotifLen, maxMotifLen), "motifIterator", (maxMotifLen >> 1) + 2 ))
         .repartition(partitions)
-        .map(x => splitBinaryDataInMotifAndBlsVector(x, (maxMotifLen >> 1) + 2 ))
-        .aggregateByKey(new BlsVector(ListBuffer.fill(thresholdCount)(0)))(
+        .map(x => splitBinaryDataInMotifAndBlsVector(x, maxMotifLen))
+        .aggregateByKey(new BlsVector(Array.fill(thresholdCount)(0)))(
             seqOp = (v, b) => {
               v.addByte(b, thresholdCount)
               v
@@ -86,7 +86,7 @@ class Tools(val bindir: String) extends Serializable with Logging {
 
   def groupMotifsByGroup(input: RDD[(List[Byte], BlsVector)], maxMotifLen: Int) : RDD[(List[Byte], ListBuffer[(List[Byte], BlsVector)])] = {
     input.map(x => {
-                (getGroupId(x._1, (maxMotifLen >> 1)  + 1), (x._1, x._2)) //length is now without the bls vector byte
+                (getGroupId(x._1, maxMotifLen), (x._1, x._2)) //length is now without the bls vector byte
               }).aggregateByKey(new ListBuffer[(List[Byte], BlsVector)]())(
                   seqOp = (list, element) => {
                     list += element
@@ -96,7 +96,7 @@ class Tools(val bindir: String) extends Serializable with Logging {
                   })
   }
 
-  def processGroups(input: RDD[(DnaString, ListBuffer[(DnaString, BlsVector)])],
+  def processGroups(input: RDD[(List[Byte], ListBuffer[(List[Byte], BlsVector)])],
       thresholdList: List[Float],
       backgroundModelCount: Int, familyCountCutOff: Int, confidenceScoreCutOff: Float) : RDD[Int] = {
     input.mapPartitions(x => {
@@ -111,13 +111,4 @@ class Tools(val bindir: String) extends Serializable with Logging {
       List(x.size).iterator
     })
   }
-
-  def stringRepresentation(input: RDD[(DnaString, (DnaString, BlsVector))]) : RDD[String] = {
-    input.map(x => (dnaToString(x._1) + "\t" + dnaToString(x._2._1) + "\t" + x._2._2.toString()))
-  }
-
-  def saveMotifs(input: RDD[Array[Byte]]) = {
-
-  }
-
 }

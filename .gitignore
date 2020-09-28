@@ -9,3 +9,4 @@ spark-warehouse/
 project/project/
 project/target/
 src/test/resources/bin/*
+test-code.scala

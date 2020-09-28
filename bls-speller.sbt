@@ -11,6 +11,7 @@ libraryDependencies += "com.github.scopt" %% "scopt" % "3.6.0"
 
 test in assembly := {}
 
+excludeFilter in unmanagedSources := "test-code.scala"
 fork in Test := true
 javaOptions ++= Seq("-Xms512M", "-Xmx2048M", "-XX:MaxPermSize=2048M", "-XX:+CMSClassUnloadingEnabled")
 parallelExecution in Test := false

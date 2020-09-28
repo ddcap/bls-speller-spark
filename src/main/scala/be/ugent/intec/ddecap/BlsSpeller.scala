@@ -23,12 +23,14 @@ object BlsSpeller extends Logging {
       bindir: String = "",
       output: String = "",
       backgroundModelCount: Int = 1000,
-      maxDegen: Int = 3,
-      minMotifLen: Int = 6,
-      maxMotifLen: Int = 13,
+      maxDegen: Int = 4,
+      minMotifLen: Int = 8,
+      maxMotifLen: Int = 9,
       familyCountCutOff: Int = 1,
+      alpbabet: Int = 1, // 0: exact, 1: exact+M, 2: exact+2+M, 3: All
       confidenceScoreCutOff: Float = 0.5f,
-      thresholdList: List[Float] = List(0.15f, 0.5f, 0.6f, 0.7f, 0.9f, 0.95f)
+      thresholdList: List[Float] = List(0.15f, 0.5f, 0.6f, 0.7f, 0.9f, 0.95f),
+      persistLevel: StorageLevel = StorageLevel.DISK_ONLY
     )
 
   var sc: SparkContext = null
@@ -72,6 +74,26 @@ object BlsSpeller extends Logging {
       opt[Int]('p', "partitions").action( (x, c) =>
         c.copy(partitions = x) ).text("Number of partitions used by executors.").required()
 
+      opt[Int]("alphabet").action( (x, c) =>
+        c.copy(alpbabet = x) ).text("Sets the alphabet used in motif iterator: 0: Exact, 1: Exact+N, 2: Exact+2fold+M, 3: All. Default is 2.")
+      opt[Int]("degen").action( (x, c) =>
+        c.copy(maxDegen = x) ).text("Sets the max number of degenerate characters.")
+      opt[Int]("min_len").action( (x, c) =>
+        c.copy(minMotifLen = x) ).text("Sets the minimum length of a motif.")
+      opt[Int]("max_len").action( (x, c) =>
+        c.copy(maxMotifLen = x) ).text("Sets the maximum length of a motif, this is not inclusive (i.e. length < maxLength).")
+
+      opt[String]("persist_level").action( (x, c) =>
+          x match {
+            case "mem" => c.copy(persistLevel = StorageLevel.MEMORY_ONLY)
+            case "mem_ser" => c.copy(persistLevel = StorageLevel.MEMORY_ONLY_SER)
+            case "mem_disk" => c.copy(persistLevel = StorageLevel.MEMORY_AND_DISK)
+            case "mem_disk_ser" => c.copy(persistLevel = StorageLevel.MEMORY_AND_DISK_SER)
+            case "disk" => c.copy(persistLevel = StorageLevel.DISK_ONLY)
+            case _ => c.copy(persistLevel = StorageLevel.DISK_ONLY)
+          }
+         ).text("Sets the persist level for RDD's: mem, mem_ser, mem_disk, mem_disk_ser, disk [default]")
+
 
       opt[Unit]("AB").action( (_, c) =>
         c.copy(alignmentBased = true) ).text("Alignment based motif discovery.")
@@ -88,8 +110,8 @@ object BlsSpeller extends Logging {
     var families = tools.readOrthologousFamilies(config.input, sc);
 
     info("family count: " + families.count);
-    val motifs = tools.iterateMotifs(families, config.alignmentBased, config.maxDegen, config.minMotifLen, config.maxMotifLen, config.partitions, config.thresholdList.size);
-    motifs.persist(StorageLevel.MEMORY_ONLY);
+    val motifs = tools.iterateMotifs(families, config.alignmentBased, config.alpbabet, config.maxDegen, config.minMotifLen, config.maxMotifLen, config.partitions, config.thresholdList.size);
+    motifs.persist(config.persistLevel);
     info("motifs found: " + motifs.count());
     info(Timer.measureTime("motif count"))
 
