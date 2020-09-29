@@ -65,17 +65,17 @@ class Tools(val bindir: String) extends Serializable with Logging {
     tmp.repartition(tmp.count.toInt); //  too many partitions for whole file -> repartition based on size???! of the familiy (# characters)
   }
 
-  def getCommand(alignmentBased: Boolean, alphabet: Int, maxDegen: Int, minMotifLen: Int, maxMotifLen: Int) : Seq[String] = {
-    tokenize( binary + (if (alignmentBased) AlignmentBasedCommand else AlignmentFreeCommand) + " " + alphabet + " - " + maxDegen + " " + minMotifLen + " " + maxMotifLen)
+  def getCommand(alignmentBased: Boolean, thresholdList: List[Float], alphabet: Int, maxDegen: Int, minMotifLen: Int, maxMotifLen: Int) : Seq[String] = {
+    tokenize( binary + " - " + (if (alignmentBased) AlignmentBasedCommand else AlignmentFreeCommand) + " " + alphabet  + " " + thresholdList.mkString(",") + " " + maxDegen + " " + minMotifLen + " " + maxMotifLen)
   }
 
-  def iterateMotifs(input: RDD[String], alignmentBased: Boolean, alphabet: Int, maxDegen: Int, minMotifLen: Int, maxMotifLen: Int, partitions: Int, thresholdCount: Int) : RDD[(List[Byte], BlsVector)] = {
-    (new org.apache.spark.BinaryPipedRDD(toBinaryFormat(input), getCommand(alignmentBased, alphabet, maxDegen, minMotifLen, maxMotifLen), "motifIterator", (maxMotifLen >> 1) + 2 ))
+  def iterateMotifs(input: RDD[String], alignmentBased: Boolean, alphabet: Int, maxDegen: Int, minMotifLen: Int, maxMotifLen: Int, partitions: Int, thresholdList: List[Float]) : RDD[(List[Byte], BlsVector)] = {
+    (new org.apache.spark.BinaryPipedRDD(toBinaryFormat(input), getCommand(alignmentBased, thresholdList, alphabet, maxDegen, minMotifLen, maxMotifLen), "motifIterator", (maxMotifLen >> 1) + 2 ))
         .repartition(partitions)
         .map(x => splitBinaryDataInMotifAndBlsVector(x, maxMotifLen))
-        .aggregateByKey(new BlsVector(Array.fill(thresholdCount)(0)))(
+        .aggregateByKey(new BlsVector(Array.fill(thresholdList.size)(0)))(
             seqOp = (v, b) => {
-              v.addByte(b, thresholdCount)
+              v.addByte(b, thresholdList.size)
               v
             },
             combOp = (v1, v2) => {

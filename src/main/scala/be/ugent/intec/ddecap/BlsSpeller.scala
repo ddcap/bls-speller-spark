@@ -93,7 +93,7 @@ object BlsSpeller extends Logging {
         {
           val list = x.split(",").map(x => x.toFloat).toList
           c.copy(thresholdList = list)
-        }).text("List of BLS threshold sepparated by a comma. Default is 0.15, 0.5, 0.6, 0.7, 0.9, 0.95.").required()
+        }).text("List of BLS threshold sepparated by a comma. Default is 0.15, 0.5, 0.6, 0.7, 0.9, 0.95.")
 
       opt[String]("persist_level").action( (x, c) =>
           x match {
@@ -122,7 +122,7 @@ object BlsSpeller extends Logging {
     var families = tools.readOrthologousFamilies(config.input, sc);
 
     info("family count: " + families.count);
-    val motifs = tools.iterateMotifs(families, config.alignmentBased, config.alpbabet, config.maxDegen, config.minMotifLen, config.maxMotifLen, config.partitions, config.thresholdList.size);
+    val motifs = tools.iterateMotifs(families, config.alignmentBased, config.alpbabet, config.maxDegen, config.minMotifLen, config.maxMotifLen, config.partitions, config.thresholdList);
     motifs.persist(config.persistLevel);
     info("motifs found: " + motifs.count());
     info(Timer.measureTime("motif count"))
