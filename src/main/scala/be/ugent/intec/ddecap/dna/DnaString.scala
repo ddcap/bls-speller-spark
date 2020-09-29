@@ -20,10 +20,11 @@ object DnaStringFunctions {
     newdata(0) = data(0)
     val chars = ListBuffer[Int]()
     for (d <- 0 to data(0) - 1 ) {
-     if((d & 0x1) == 0)
-       chars += (data(d >> 1) & 0xf)
-     else
-       chars += ((data(d >> 1)>> 4) & 0xf)
+     if((d & 0x1) == 0) {
+       chars += (data(1 + (d >> 1)) & 0xf)
+     } else {
+       chars += ((data(1 + (d >> 1)) >> 4) & 0xf)
+     }
     }
     var idx = 1
     var i = 0
