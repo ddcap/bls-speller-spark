@@ -98,7 +98,7 @@ class Tools(val bindir: String) extends Serializable with Logging {
 
   def processGroups(input: RDD[(List[Byte], ListBuffer[(List[Byte], BlsVector)])],
       thresholdList: List[Float],
-      backgroundModelCount: Int, familyCountCutOff: Int, confidenceScoreCutOff: Float) : RDD[Int] = {
+      backgroundModelCount: Int, familyCountCutOff: Int, confidenceScoreCutOff: Double) : RDD[Int] = {
     input.mapPartitions(x => {
       // x is an iterator over the motifs+blsvector in this group
       // TODO for every Threshold Ti:

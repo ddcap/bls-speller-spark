@@ -22,13 +22,13 @@ object BlsSpeller extends Logging {
       alignmentBased: Boolean = false,
       bindir: String = "",
       output: String = "",
-      backgroundModelCount: Int = 1000,
       maxDegen: Int = 4,
       minMotifLen: Int = 8,
       maxMotifLen: Int = 9,
-      familyCountCutOff: Int = 1,
       alpbabet: Int = 1, // 0: exact, 1: exact+M, 2: exact+2+M, 3: All
-      confidenceScoreCutOff: Float = 0.5f,
+      familyCountCutOff: Int = 1,
+      backgroundModelCount: Int = 1000,
+      confidenceScoreCutOff: Double = 0.5,
       thresholdList: List[Float] = List(0.15f, 0.5f, 0.6f, 0.7f, 0.9f, 0.95f),
       persistLevel: StorageLevel = StorageLevel.DISK_ONLY
     )
@@ -82,6 +82,18 @@ object BlsSpeller extends Logging {
         c.copy(minMotifLen = x) ).text("Sets the minimum length of a motif.")
       opt[Int]("max_len").action( (x, c) =>
         c.copy(maxMotifLen = x) ).text("Sets the maximum length of a motif, this is not inclusive (i.e. length < maxLength).")
+      opt[Int]("fam_cutoff").action( (x, c) =>
+        c.copy(familyCountCutOff = x) ).text("Sets the number of families a motif needs to be part of to be valid. Default is 1.")
+      opt[Int]("bg_model_count").action( (x, c) =>
+        c.copy(backgroundModelCount = x) ).text("Sets the count of motifs in the background model. Default is 1000.")
+      opt[Double]("conf_cutoff").action( (x, c) =>
+        c.copy(confidenceScoreCutOff = x) ).text("Sets the cutoff for confidence scores. Default is 0.5.")
+
+      opt[String]("bls_thresholds").action( (x, c) =>
+        {
+          val list = x.split(",").map(x => x.toFloat).toList
+          c.copy(thresholdList = list)
+        }).text("List of BLS threshold sepparated by a comma. Default is 0.15, 0.5, 0.6, 0.7, 0.9, 0.95.").required()
 
       opt[String]("persist_level").action( (x, c) =>
           x match {
