@@ -93,7 +93,7 @@ object BlsSpeller extends Logging {
         {
           val list = x.split(",").map(x => x.toFloat).toList
           c.copy(thresholdList = list)
-        }).text("List of BLS threshold sepparated by a comma. Default is 0.15, 0.5, 0.6, 0.7, 0.9, 0.95.")
+        }).text("List of BLS threshold sepparated by a comma. Default is 0.15, 0.5, 0.6, 0.7, 0.9, 0.95. Currently a maximum of 8 thresholds is supported!")
 
       opt[String]("persist_level").action( (x, c) =>
           x match {
