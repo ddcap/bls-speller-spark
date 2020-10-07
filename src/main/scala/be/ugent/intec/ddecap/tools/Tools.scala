@@ -31,8 +31,8 @@ class Tools(val bindir: String) extends Serializable with Logging {
     }
     buf
   }
-  private def toBinaryPairFormat(rdd: RDD[String]) : RDD[(Seq[Byte], (Array[Byte], Byte))] = {
-    rdd.map(x => (x.getBytes, (Array(), 0x0)))
+  private def toBinaryPairFormat(rdd: RDD[String]) : RDD[(Seq[Byte], (Seq[Byte], Byte))] = {
+    rdd.map(x => (x.getBytes, (Seq(), 0x0)))
   }
   private def toBinaryFormat(rdd: RDD[String]) : RDD[Array[Byte]] = {
     rdd.map(x => x.getBytes)
@@ -73,7 +73,7 @@ class Tools(val bindir: String) extends Serializable with Logging {
 
   def iterateMotifs(input: RDD[String], alignmentBased: Boolean, alphabet: Int,
     maxDegen: Int, minMotifLen: Int, maxMotifLen: Int,
-    thresholdList: List[Float]) : RDD[(Seq[Byte], (Array[Byte], Byte))] = {
+    thresholdList: List[Float]) : RDD[(Seq[Byte], (Seq[Byte], Byte))] = {
 
       // iterateMotifs (c++ binary) outputs binary data, per motif this content is given:
       // 1 byte: length of motif
@@ -91,7 +91,7 @@ class Tools(val bindir: String) extends Serializable with Logging {
     // this is formatted in a key value pair as follows:
     // key: array[byte] -> first byte of length + motif content group
     // value: (array[byte], byte) -> the content of the motif itself (without the length! as this is already in the key) + the bls byte
-    (new org.apache.spark.BinaryPipedRDD(toBinaryPairFormat(input), getCommand(alignmentBased, thresholdList, alphabet, maxDegen, minMotifLen, maxMotifLen), "motifIterator", maxMotifLen)) : RDD[(Seq[Byte], (Array[Byte], Byte))]
+    (new org.apache.spark.BinaryPipedRDD(toBinaryPairFormat(input), getCommand(alignmentBased, thresholdList, alphabet, maxDegen, minMotifLen, maxMotifLen), "motifIterator", maxMotifLen))
   }
 
 }

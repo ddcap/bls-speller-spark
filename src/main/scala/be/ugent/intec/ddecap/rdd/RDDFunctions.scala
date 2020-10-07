@@ -15,13 +15,13 @@ object RDDFunctions {
   val logger = Logger.getLogger(getClass().getName());
   type ContentWithMotifAndBlsHashmap = (Array[Byte], HashMap[Array[Byte], BlsVector])
 
-    def groupMotifsByGroup(input: RDD[(Seq[Byte], (Array[Byte], Byte))], thresholdList: List[Float], partitions: Int) : RDD[(Seq[Byte], HashMap[Array[Byte], BlsVector])] = {
+    def groupMotifsByGroup(input: RDD[(Seq[Byte], (Seq[Byte], Byte))], thresholdList: List[Float], partitions: Int) : RDD[(Seq[Byte], HashMap[Seq[Byte], BlsVector])] = {
       // per content group, we collect all motifs, per motif in this group we combine these together by adding the bls vector
       input.combineByKey(
-          (p:(Array[Byte], Byte)) => { // convert input value to output value
+          (p:(Seq[Byte], Byte)) => { // convert input value to output value
             HashMap((p._1 -> getBlsVectorFromByte(p._2, thresholdList.size)))
           },
-          (map:HashMap[Array[Byte], BlsVector], p:(Array[Byte], Byte)) => { // merge an input value with an already existing output value
+          (map:HashMap[Seq[Byte], BlsVector], p:(Seq[Byte], Byte)) => { // merge an input value with an already existing output value
             if(map.contains(p._1))
               map.merged(HashMap((p._1 -> getBlsVectorFromByte(p._2, thresholdList.size))))({
                 case ((k,v1),(_,v2)) => (k,v1.addVector(v2))
@@ -30,15 +30,15 @@ object RDDFunctions {
               map + (p._1 -> getBlsVectorFromByte(p._2, thresholdList.size))
             }
           },
-          (map1:HashMap[Array[Byte], BlsVector], map2:HashMap[Array[Byte], BlsVector]) => { // merge two existing output values together
+          (map1:HashMap[Seq[Byte], BlsVector], map2:HashMap[Seq[Byte], BlsVector]) => { // merge two existing output values together
             map1.merged(map2)({
               case ((k,v1:BlsVector),(_,v2:BlsVector)) => (k,v1.addVector(v2))
             })
           },
-          new DnaStringPartitioner(partitions), false) // mapsidecombine cannot be true with array as key....
+          new DnaStringPartitioner(partitions), true) // mapsidecombine cannot be true with array as key....
     }
 
-    def processGroups(input: RDD[(Seq[Byte], HashMap[Array[Byte], BlsVector])],
+    def processGroups(input: RDD[(Seq[Byte], HashMap[Seq[Byte], BlsVector])],
         thresholdList: List[Float],
         backgroundModelCount: Int, familyCountCutOff: Int, confidenceScoreCutOff: Double) : RDD[(Seq[Byte], Byte, BlsVector, List[Float])] = {
       input.flatMap(x => { // x is an iterator over the motifs+blsvector in this group

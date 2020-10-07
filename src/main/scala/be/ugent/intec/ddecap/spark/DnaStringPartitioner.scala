@@ -18,6 +18,9 @@ class DnaStringPartitioner(val maxNumPart: Int) extends Partitioner with Logging
         // info("hash: " + hashCode)
         Math.abs(hashCode % maxNumPart)
       }
+      case (dnastring: Vector[Byte]) => {
+        Math.abs(dnastring.hashCode % maxNumPart)
+      }
       case (dnastring: Array[Byte]) => {
         var hashCode: Int  = dnastring(1) // start at second byte since first byte is always length! and can be same...
         for(i <- 2 until Math.max(5, dnastring.size)) {

@@ -28,7 +28,7 @@ class BinaryPipedRDD[T: ClassTag](
     var logLevel: Level = Level.INFO,
     envVars: Map[String, String] = scala.collection.immutable.Map(),
     separateWorkingDir: Boolean = false)
-  extends RDD[(Seq[Byte], (Array[Byte], Byte))](prev) with be.ugent.intec.ddecap.Logging {
+  extends RDD[(Seq[Byte], (Seq[Byte], Byte))](prev) with be.ugent.intec.ddecap.Logging {
 
 
   class NotEqualsFileNameFilter(filterName: String) extends FilenameFilter {
@@ -39,7 +39,7 @@ class BinaryPipedRDD[T: ClassTag](
 
   override def getPartitions: Array[Partition] = firstParent[T].partitions
 
-  override def compute(split: Partition, context: TaskContext): Iterator[(Seq[Byte],(Array[Byte], Byte))] = {
+  override def compute(split: Partition, context: TaskContext): Iterator[(Seq[Byte],(Seq[Byte], Byte))] = {
 
     if(logLevel != null && logLevel != Level.ERROR) {
         Logger.getLogger("be.ugent.intec.ddecap").setLevel(logLevel)
@@ -124,7 +124,7 @@ class BinaryPipedRDD[T: ClassTag](
 //        val out = new PrintWriter(new BufferedWriter(
 //          new OutputStreamWriter(proc.getOutputStream, Codec.defaultCharsetCodec.name), bufferSize))
         try {
-          for (elem <- firstParent[(Seq[Byte], (Array[Byte], Array[Byte]))].iterator(split, context)) {
+          for (elem <- firstParent[(Seq[Byte], _)].iterator(split, context)) {
             fsize += elem._1.size
             out.write(elem._1.toArray)
           }
@@ -165,14 +165,14 @@ class BinaryPipedRDD[T: ClassTag](
     val buf = ByteBuffer.allocate(bufsize);
     var bytesRead = channel.read(buf)
     buf.flip()
-    new Iterator[(Seq[Byte], (Array[Byte], Byte))] {
-      def next(): (Seq[Byte], (Array[Byte], Byte)) = {
+    new Iterator[(Seq[Byte], (Seq[Byte], Byte))] {
+      def next(): (Seq[Byte], (Seq[Byte], Byte)) = {
         if (!hasNext()) {
           throw new NoSuchElementException()
         }
         buf.get(grp)
         buf.get(wrd)            //    length + grp
-        (grp, (wrd, buf.get))    // --> (array[byte] , (array[byte], byte ))
+        (grp.toVector, (wrd.toVector, buf.get))    // --> (array[byte] , (array[byte], byte ))
       }
       def hasNext(): Boolean = {
         val result = if (buf.position + totalMotifSize <= buf.limit)

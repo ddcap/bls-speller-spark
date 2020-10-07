@@ -26,7 +26,7 @@ object BlsSpeller extends Logging {
       maxDegen: Int = 4,
       minMotifLen: Int = 8,
       maxMotifLen: Int = 9,
-      alpbabet: Int = 2, // 0: exact, 1: exact+N, 2: exact+2fold+M, 3: All
+      alphabet: Int = 2, // 0: exact, 1: exact+N, 2: exact+2fold+M, 3: All
       familyCountCutOff: Int = 1,
       backgroundModelCount: Int = 1000,
       confidenceScoreCutOff: Double = 0.5,
@@ -80,7 +80,7 @@ object BlsSpeller extends Logging {
         c.copy(partitions = x) ).text("Number of partitions used by executors.").required()
 
       opt[Int]("alphabet").action( (x, c) =>
-        c.copy(alpbabet = x) ).text("Sets the alphabet used in motif iterator: 0: Exact, 1: Exact+N, 2: Exact+2fold+M, 3: All. Default is 2.")
+        c.copy(alphabet = x) ).text("Sets the alphabet used in motif iterator: 0: Exact, 1: Exact+N, 2: Exact+2fold+M, 3: All. Default is 2.")
       opt[Int]("degen").action( (x, c) =>
         c.copy(maxDegen = x) ).text("Sets the max number of degenerate characters.")
       opt[Int]("min_len").action( (x, c) =>
@@ -127,16 +127,22 @@ object BlsSpeller extends Logging {
     var families = tools.readOrthologousFamilies(config.input, sc);
 
     info("family count: " + families.count);
-    val motifs = tools.iterateMotifs(families, config.alignmentBased, config.alpbabet, config.maxDegen, config.minMotifLen, config.maxMotifLen, config.thresholdList);
+    val motifs = tools.iterateMotifs(families, config.alignmentBased, config.alphabet, config.maxDegen, config.minMotifLen, config.maxMotifLen, config.thresholdList);
     val groupedMotifs = groupMotifsByGroup(motifs, config.thresholdList, config.partitions);
     val output = processGroups(groupedMotifs, config.thresholdList, config.backgroundModelCount, config.familyCountCutOff, config.confidenceScoreCutOff)
 
+    // motifs.persist(config.persistLevel)
+    // info("motifs count: " + motifs.count);
+    // groupedMotifs.persist(config.persistLevel)
+    // info("groupedMotifs count: " + groupedMotifs.count);
     deleteRecursively(config.output);
     output.map(x => (dnaWithoutLenToString(x._1, x._2) + "\t" + x._3 + "\t" + x._4.mkString("\t"))).saveAsTextFile(config.output);
 
 // for testing can write other rdd's to output:
     // deleteRecursively(config.output + "-motifs");
-    // groupedMotifs.map(x => (dnaToString(x._1), x._2)).saveAsTextFile(config.output + "-motifs");
+    // motifs.map(x => dnaToString(x._1) + "\t" + dnaWithoutLenToString(x._2._1, 8) + "\t" + x._2._2.toBinaryString).saveAsTextFile(config.output + "-motifs");
+    // deleteRecursively(config.output + "-groupedmotifs");
+    // groupedMotifs.map(x => dnaToString(x._1) + "\n" + x._2.map(y => (dnaWithoutLenToString(y._1, 8), y._2)).mkString("\t")).saveAsTextFile(config.output + "-groupedmotifs");
 
     info(Timer.measureTotalTime("BlsSpeller"))
   }

@@ -11,9 +11,9 @@ object BinaryDnaStringFunctions {
   private final val byteToAscii = Array(' ', 'A', 'C', 'M', 'G', 'R', 'S', 'V', 'T', 'W', 'Y', 'H', 'K', 'D', 'B', 'N')
   val logger = Logger.getLogger(getClass().getName());
 
-  def generateBackgroundModel(key: Seq[Byte], backgroundModelCount: Int) : ListBuffer[Array[Byte]] = {
+  def generateBackgroundModel(key: Seq[Byte], backgroundModelCount: Int) : ListBuffer[Seq[Byte]] = {
     // generate x permutations of this key motif
-    val ret = ListBuffer[Array[Byte]]()
+    val ret = ListBuffer[Seq[Byte]]()
     val chars = ListBuffer[Int]()
     for (d <- 0 until key(0) ) {
      if((d & 0x1) == 0)
@@ -61,7 +61,7 @@ object BinaryDnaStringFunctions {
   def findMedian(arr: List[Int]) = findKMedian(arr, (arr.size - 1) / 2)
 
 
-  def getMedianPerThreshold(data: HashMap[Array[Byte], BlsVector], bgmodel: ListBuffer[Array[Byte]], thresholdListSize: Int) : BlsVector = {
+  def getMedianPerThreshold(data: HashMap[Seq[Byte], BlsVector], bgmodel: ListBuffer[Seq[Byte]], thresholdListSize: Int) : BlsVector = {
     // uses the existing motifs with corresponding bls vectors to determine the backgrounmodel, other motifs have a bls vector with all 0s
     val arr = Array.fill(thresholdListSize)(0)
     val nulvector = new BlsVector(Array.fill(thresholdListSize)(0))
