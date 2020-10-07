@@ -11,8 +11,9 @@ import org.apache.log4j.Logger
 import org.apache.log4j.Level
 import org.apache.spark.SparkConf;
 import be.ugent.intec.ddecap.tools.Tools;
-import be.ugent.intec.ddecap.rdd.BinaryRDDFunctions._;
+// import be.ugent.intec.ddecap.rdd.BinaryRDDFunctions._;
 import be.ugent.intec.ddecap.tools.FileUtils._;
+import be.ugent.intec.ddecap.dna.BinaryDnaStringFunctions._
 
 
 object BlsSpeller extends Logging {
@@ -25,12 +26,12 @@ object BlsSpeller extends Logging {
       maxDegen: Int = 4,
       minMotifLen: Int = 8,
       maxMotifLen: Int = 9,
-      alpbabet: Int = 1, // 0: exact, 1: exact+M, 2: exact+2+M, 3: All
+      alpbabet: Int = 2, // 0: exact, 1: exact+N, 2: exact+2fold+M, 3: All
       familyCountCutOff: Int = 1,
       backgroundModelCount: Int = 1000,
       confidenceScoreCutOff: Double = 0.5,
       thresholdList: List[Float] = List(0.15f, 0.5f, 0.6f, 0.7f, 0.9f, 0.95f),
-      persistLevel: StorageLevel = StorageLevel.DISK_ONLY
+      persistLevel: StorageLevel = StorageLevel.MEMORY_AND_DISK
     )
 
   var sc: SparkContext = null
@@ -43,7 +44,11 @@ object BlsSpeller extends Logging {
         Logger.getLogger("org").setLevel(Level.ERROR)
         Logger.getLogger("akka").setLevel(Level.ERROR)
         var conf: SparkConf = null;
-        conf = new SparkConf();
+        conf = new SparkConf()
+              .set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+              .set("spark.kryo.registrator","be.ugent.intec.ddecap.spark.BlsKryoSerializer")
+              .set("spark.kryoserializer.buffer.mb","128")
+              .set("spark.kryo.registrationRequired", "true");
         val spark = SparkSession.builder
                                 .appName("BLS Speller")
                                 .config(conf)
@@ -102,9 +107,9 @@ object BlsSpeller extends Logging {
             case "mem_disk" => c.copy(persistLevel = StorageLevel.MEMORY_AND_DISK)
             case "mem_disk_ser" => c.copy(persistLevel = StorageLevel.MEMORY_AND_DISK_SER)
             case "disk" => c.copy(persistLevel = StorageLevel.DISK_ONLY)
-            case _ => c.copy(persistLevel = StorageLevel.DISK_ONLY)
+            case _ => c.copy(persistLevel = StorageLevel.MEMORY_AND_DISK)
           }
-         ).text("Sets the persist level for RDD's: mem, mem_ser, mem_disk, mem_disk_ser, disk [default]")
+         ).text("Sets the persist level for RDD's: mem, mem_ser, mem_disk [default], mem_disk_ser, disk")
 
 
       opt[Unit]("AB").action( (_, c) =>
@@ -122,19 +127,16 @@ object BlsSpeller extends Logging {
     var families = tools.readOrthologousFamilies(config.input, sc);
 
     info("family count: " + families.count);
-    val motifs = tools.iterateMotifs(families, config.alignmentBased, config.alpbabet, config.maxDegen, config.minMotifLen, config.maxMotifLen, config.partitions, config.thresholdList);
-    motifs.persist(config.persistLevel);
-    info("motifs found: " + motifs.count());
-    info(Timer.measureTime("motif count"))
+    val motifs = tools.iterateMotifs(families, config.alignmentBased, config.alpbabet, config.maxDegen, config.minMotifLen, config.maxMotifLen, config.thresholdList);
+    val groupedMotifs = tools.groupMotifsByGroup(motifs, config.thresholdList, config.partitions);
+    val output = tools.processGroups(groupedMotifs, config.thresholdList, config.backgroundModelCount, config.familyCountCutOff, config.confidenceScoreCutOff)
 
-    val groupedMotifs = tools.groupMotifsByGroup(motifs, config.maxMotifLen);
-    info("groupedMotifs found: " + groupedMotifs.count());
-    info(Timer.measureTime("grouped motifs count"))
+    deleteRecursively(config.output);
+    output.map(x => (dnaWithoutLenToString(x._1, x._2) + "\t" + x._3 + "\t" + x._4.mkString("\t"))).saveAsTextFile(config.output);
 
-    // val test = tools.processGroups(groupedMotifs, config.thresholdList, config.backgroundModelCount, config.familyCountCutOff, config.confidenceScoreCutOff)
-    // test.collect().foreach(println)
-    // deleteRecursively(config.output);
-    // tools.stringRepresentation(motifs).saveAsTextFile(config.output);
+// for testing can write other rdd's to output:
+    // deleteRecursively(config.output + "-motifs");
+    // groupedMotifs.map(x => (dnaToString(x._1), x._2)).saveAsTextFile(config.output + "-motifs");
 
     info(Timer.measureTotalTime("BlsSpeller"))
   }

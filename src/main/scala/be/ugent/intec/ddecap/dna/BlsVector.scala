@@ -7,30 +7,34 @@ import be.ugent.intec.ddecap.Logging
 class BlsVector(var list : Array[Int]) extends Serializable with Logging {
   def addVector(other: BlsVector) = {
     assert(other.list.length == list.length)
-    (list, other.list).zipped.map(_ + _)
+    for (i <- 0 until list.length) {
+      list(i) += other.list(i)
+    }
+    this
   }
   def addByte(data: Byte, len: Int) = {
     assert(len == list.length)
-    for (i <- 0 to len - 1) {
+    for (i <- 0 until len) {
       list(i) += (0x1 & (data >> i));
     }
+    this
+  }
+  def getThresholdCount(idx: Int) = {
+    assert(idx < list.size)
+    list(idx)
   }
   override
   def toString() : String = {
-    var ret = list(0).toString
-    for ( i <- 1 to list.length - 1) {
-      ret += "," + list(i);
-    }
-    return ret;
+    return list.mkString("\t");
   }
 }
 
 object BlsVectorFunctions {
   def getBlsVectorFromByte(data: Byte, len: Int) : BlsVector = {
-    var list = Array[Int](len)
+    var list = Array.fill(len)(0)
     for (i <- 0 to len - 1) {
       list(i) = (0x1 & (data >> i));
     }
-    return new BlsVector(list.toArray)
+    return new BlsVector(list)
   }
 }

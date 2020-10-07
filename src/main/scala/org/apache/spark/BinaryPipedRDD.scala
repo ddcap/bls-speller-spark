@@ -7,24 +7,28 @@ import java.util.StringTokenizer
 import scala.collection.mutable.ArrayBuffer
 import scala.collection.JavaConverters._
 import org.apache.spark.util.Utils
-import java.io.{File, FilenameFilter, IOException, PrintWriter, OutputStreamWriter, BufferedWriter,DataOutputStream}
+import java.io.{File, FilenameFilter, IOException, PrintWriter, OutputStreamWriter, BufferedWriter,DataOutputStream, BufferedInputStream}
 import scala.io.{Codec, Source}
 import java.util.concurrent.atomic.AtomicReference
 import org.apache.spark.rdd.RDD
 import scala.io.Codec.string2codec
 import org.apache.log4j.{Level, Logger}
+import be.ugent.intec.ddecap.dna.BinaryDnaStringFunctions._
 import scala.collection.mutable.ListBuffer
+import java.nio.ByteBuffer
+import java.nio.channels.Channels
+import scala.annotation.tailrec
 
 // based on PipedRDD from Spark!
 class BinaryPipedRDD[T: ClassTag](
     prev: RDD[T],
     command: Seq[String],
     procName: String,
-    motifSize: Int,
+    maxMotifLen: Int,
     var logLevel: Level = Level.INFO,
     envVars: Map[String, String] = scala.collection.immutable.Map(),
     separateWorkingDir: Boolean = false)
-  extends RDD[Array[Byte]](prev) with be.ugent.intec.ddecap.Logging {
+  extends RDD[(Seq[Byte], (Array[Byte], Byte))](prev) with be.ugent.intec.ddecap.Logging {
 
 
   class NotEqualsFileNameFilter(filterName: String) extends FilenameFilter {
@@ -35,7 +39,7 @@ class BinaryPipedRDD[T: ClassTag](
 
   override def getPartitions: Array[Partition] = firstParent[T].partitions
 
-  override def compute(split: Partition, context: TaskContext): Iterator[Array[Byte]] = {
+  override def compute(split: Partition, context: TaskContext): Iterator[(Seq[Byte],(Array[Byte], Byte))] = {
 
     if(logLevel != null && logLevel != Level.ERROR) {
         Logger.getLogger("be").setLevel(logLevel)
@@ -123,14 +127,14 @@ class BinaryPipedRDD[T: ClassTag](
 //        val out = new PrintWriter(new BufferedWriter(
 //          new OutputStreamWriter(proc.getOutputStream, Codec.defaultCharsetCodec.name), bufferSize))
         try {
-          for (elem <- firstParent[List[Byte]].iterator(split, context)) {
-            fsize += elem.size
-            out.write(elem.toArray)
+          for (elem <- firstParent[(Seq[Byte], (Array[Byte], Array[Byte]))].iterator(split, context)) {
+            fsize += elem._1.size
+            out.write(elem._1.toArray)
           }
         } catch {
           case t: Throwable => childThreadException.set(t)
         } finally {
-          // info("["+ split.index+ "] has written " + fsize + " to stdin")
+          info("["+ split.index+ "] has written " + fsize + " to stdin")
           out.close()
         }
       }
@@ -151,9 +155,80 @@ class BinaryPipedRDD[T: ClassTag](
       }
     }
 
-//    val lines = Source.fromInputStream(proc.getInputStream)(encoding).getLines
-    val data = org.apache.commons.io.IOUtils.toByteArray(proc.getInputStream).grouped(motifSize)
+    // reads data in stream, without loading it all to memory
+    //    group    motif
+    // 8 - - - -  - - - -  bls
+    val wordSize = (maxMotifLen >> 1)
+    val totalMotifSize = 2 * wordSize + 2
+    val grp: Array[Byte] = Array.fill(wordSize + 1)(0x0);
+    val wrd: Array[Byte] = Array.fill(wordSize)(0x0);
+    val channel = Channels.newChannel(proc.getInputStream)
+    val bufsize = totalMotifSize * 2048 // should be about best performance at this number
+    val buf = ByteBuffer.allocate(bufsize);
+    var bytesRead = channel.read(buf)
+    buf.flip()
+    new Iterator[(Seq[Byte], (Array[Byte], Byte))] {
+      def next(): (Seq[Byte], (Array[Byte], Byte)) = {
+        if (!hasNext()) {
+          throw new NoSuchElementException()
+        }
+        buf.get(grp)
+        buf.get(wrd)            //    length + grp
+        (grp, (wrd, buf.get))    // --> (array[byte] , (array[byte], byte ))
+      }
+      def hasNext(): Boolean = {
+        val result = if (buf.position + totalMotifSize <= buf.limit)
+          true
+        else {
+          buf.compact()
+          bytesRead = channel.read(buf)
+          if(bytesRead > 0){
+            buf.flip()
+            info("read " + bytesRead + " valid bytes")
+            true
+          } else {
+            val exitStatus = proc.waitFor()
+            cleanup()
+            if (exitStatus != 0) {
+              error(s"Subprocess exited with status $exitStatus. " +
+                s"Command ran: " + command.mkString(" "))
+              throw new IllegalStateException(s"Subprocess exited with status $exitStatus. " +
+                s"Command ran: " + command.mkString(" "))
+            }
+            info("["+ split.index+ "] finished " + procName + " in "+(System.nanoTime-time)/1.0e9+"s")
+            false
+          }
+        }
+        propagateChildException()
+        result
+      }
+      private def cleanup(): Unit = {
+        // cleanup task working directory if used
+        if (workInTaskDirectory) {
+          scala.util.control.Exception.ignoring(classOf[IOException]) {
+            Utils.deleteRecursively(new File(taskDirectory))
+          }
+          logDebug(s"Removed task working directory $taskDirectory")
+        }
+      }
 
+      private def propagateChildException(): Unit = {
+        val t = childThreadException.get()
+        if (t != null) {
+          error(s"Caught exception while running pipe() operator. Command ran: $cmd. " +
+            s"Exception: ${t.getMessage}")
+          proc.destroy()
+          cleanup()
+          throw t
+        }
+      }
+    }
+/**
+// loads all data in memory -> not good
+//    val lines = Source.fromInputStream(proc.getInputStream)(encoding).getLines
+    val data = org.apache.commons.io.IOUtils.toByteArray(new BufferedInputStream(proc.getInputStream)).grouped((maxMotifLen >> 1) + 2)
+    // val bb = ByteBuffer.wrap(data)
+    // bb.
 
     new Iterator[Array[Byte]] {
       def next(): Array[Byte] = {
@@ -161,6 +236,7 @@ class BinaryPipedRDD[T: ClassTag](
           throw new NoSuchElementException()
         }
         data.next()
+        // splitBinaryDataInMotifAndBlsVector(data.next(), maxMotifLen)
       }
 
       def hasNext(): Boolean = {
@@ -202,5 +278,8 @@ class BinaryPipedRDD[T: ClassTag](
         }
       }
     }
+
+  **/
+
   }
 }
