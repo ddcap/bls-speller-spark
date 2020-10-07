@@ -11,7 +11,7 @@ import org.apache.log4j.Logger
 import org.apache.log4j.Level
 import org.apache.spark.SparkConf;
 import be.ugent.intec.ddecap.tools.Tools;
-// import be.ugent.intec.ddecap.rdd.BinaryRDDFunctions._;
+import be.ugent.intec.ddecap.rdd.RDDFunctions._;
 import be.ugent.intec.ddecap.tools.FileUtils._;
 import be.ugent.intec.ddecap.dna.BinaryDnaStringFunctions._
 
@@ -128,8 +128,8 @@ object BlsSpeller extends Logging {
 
     info("family count: " + families.count);
     val motifs = tools.iterateMotifs(families, config.alignmentBased, config.alpbabet, config.maxDegen, config.minMotifLen, config.maxMotifLen, config.thresholdList);
-    val groupedMotifs = tools.groupMotifsByGroup(motifs, config.thresholdList, config.partitions);
-    val output = tools.processGroups(groupedMotifs, config.thresholdList, config.backgroundModelCount, config.familyCountCutOff, config.confidenceScoreCutOff)
+    val groupedMotifs = groupMotifsByGroup(motifs, config.thresholdList, config.partitions);
+    val output = processGroups(groupedMotifs, config.thresholdList, config.backgroundModelCount, config.familyCountCutOff, config.confidenceScoreCutOff)
 
     deleteRecursively(config.output);
     output.map(x => (dnaWithoutLenToString(x._1, x._2) + "\t" + x._3 + "\t" + x._4.mkString("\t"))).saveAsTextFile(config.output);

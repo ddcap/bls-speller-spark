@@ -42,11 +42,8 @@ class BinaryPipedRDD[T: ClassTag](
   override def compute(split: Partition, context: TaskContext): Iterator[(Seq[Byte],(Array[Byte], Byte))] = {
 
     if(logLevel != null && logLevel != Level.ERROR) {
-        Logger.getLogger("be").setLevel(logLevel)
+        Logger.getLogger("be.ugent.intec.ddecap").setLevel(logLevel)
         Logger.getLogger("org.apache.spark.BinaryPipedRDD").setLevel(logLevel)
-        Logger.getLogger("org.apache.spark.ChainedCommandBinaryPipedRDD").setLevel(logLevel)
-        Logger.getLogger("org.apache.spark.StringPipedRDD").setLevel(logLevel)
-        Logger.getLogger("org.apache.spark.TmpFileBinaryPipedRDD").setLevel(logLevel)
     }
     logLevel = Logger.getLogger(getClass()).getLevel()
     val time = System.nanoTime
@@ -155,8 +152,9 @@ class BinaryPipedRDD[T: ClassTag](
       }
     }
 
-    // reads data in stream, without loading it all to memory
-    //    group    motif
+    // reads data in stream, without loading it all to memory!! -> way more memory efficient
+    // example data format with size of 8:
+    //    group    motif <-- (4 bytes since 2 chars per byte and theres 8 chars)
     // 8 - - - -  - - - -  bls
     val wordSize = (maxMotifLen >> 1)
     val totalMotifSize = 2 * wordSize + 2
@@ -223,63 +221,6 @@ class BinaryPipedRDD[T: ClassTag](
         }
       }
     }
-/**
-// loads all data in memory -> not good
-//    val lines = Source.fromInputStream(proc.getInputStream)(encoding).getLines
-    val data = org.apache.commons.io.IOUtils.toByteArray(new BufferedInputStream(proc.getInputStream)).grouped((maxMotifLen >> 1) + 2)
-    // val bb = ByteBuffer.wrap(data)
-    // bb.
-
-    new Iterator[Array[Byte]] {
-      def next(): Array[Byte] = {
-        if (!hasNext()) {
-          throw new NoSuchElementException()
-        }
-        data.next()
-        // splitBinaryDataInMotifAndBlsVector(data.next(), maxMotifLen)
-      }
-
-      def hasNext(): Boolean = {
-        val result = if (data.hasNext) {
-          true
-        } else {
-          val exitStatus = proc.waitFor()
-          cleanup()
-          if (exitStatus != 0) {
-            error(s"Subprocess exited with status $exitStatus. " +
-              s"Command ran: " + command.mkString(" "))
-            throw new IllegalStateException(s"Subprocess exited with status $exitStatus. " +
-              s"Command ran: " + command.mkString(" "))
-          }
-          info("["+ split.index+ "] finished " + procName + " in "+(System.nanoTime-time)/1.0e9+"s")
-          false
-        }
-        propagateChildException()
-        result
-      }
-      private def cleanup(): Unit = {
-        // cleanup task working directory if used
-        if (workInTaskDirectory) {
-          scala.util.control.Exception.ignoring(classOf[IOException]) {
-            Utils.deleteRecursively(new File(taskDirectory))
-          }
-          logDebug(s"Removed task working directory $taskDirectory")
-        }
-      }
-
-      private def propagateChildException(): Unit = {
-        val t = childThreadException.get()
-        if (t != null) {
-          error(s"Caught exception while running pipe() operator. Command ran: $cmd. " +
-            s"Exception: ${t.getMessage}")
-          proc.destroy()
-          cleanup()
-          throw t
-        }
-      }
-    }
-
-  **/
 
   }
 }

@@ -8,7 +8,6 @@ class DnaStringPartitioner(val maxNumPart: Int) extends Partitioner with Logging
   override def getPartition(key: Any): Int = {
     key match {
       case (dnastring: WrappedArray[Byte]) => { // is Seq[Byte]
-        // should be exactly one element always!
         var hashCode: Int  = dnastring(1) // cause first bit is always length! and can be same...
         for(i <- 2 until Math.max(5, dnastring.size)) {
           hashCode |= dnastring(i) << (8*(i-1))
@@ -19,9 +18,8 @@ class DnaStringPartitioner(val maxNumPart: Int) extends Partitioner with Logging
         // info("hash: " + hashCode)
         Math.abs(hashCode % maxNumPart)
       }
-      case (dnastring: Array[Byte]) => { 
-        // should be exactly one element always!
-        var hashCode: Int  = dnastring(1) // cause first bit is always length! and can be same...
+      case (dnastring: Array[Byte]) => {
+        var hashCode: Int  = dnastring(1) // start at second byte since first byte is always length! and can be same...
         for(i <- 2 until Math.max(5, dnastring.size)) {
           hashCode |= dnastring(i) << (8*(i-1))
         }

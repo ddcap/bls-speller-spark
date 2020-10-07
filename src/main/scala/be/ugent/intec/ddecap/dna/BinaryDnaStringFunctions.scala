@@ -2,9 +2,9 @@ package be.ugent.intec.ddecap.dna
 
 import be.ugent.intec.ddecap.dna.BlsVectorFunctions._
 import scala.collection.mutable.ListBuffer
-import be.ugent.intec.ddecap.Logging
 import org.apache.log4j._
 import collection.immutable.HashMap
+import scala.annotation.tailrec
 
 object BinaryDnaStringFunctions {
 
@@ -44,7 +44,6 @@ object BinaryDnaStringFunctions {
   }
 
 
-  import scala.annotation.tailrec
 
   def chooseRandomPivot(arr: List[Int]): Int = arr(scala.util.Random.nextInt(arr.size))
   @tailrec final def findKMedian(arr: List[Int], k: Int): Int = {
