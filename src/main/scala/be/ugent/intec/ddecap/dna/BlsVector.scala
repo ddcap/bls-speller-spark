@@ -7,34 +7,29 @@ import be.ugent.intec.ddecap.Logging
  * @param list Array of BLS scores
  */
 @SerialVersionUID(232L)
-class BlsVector(var list: Array[Int]) extends Serializable with Logging {
-  /**
-   * Return vector of element-wise sum of this and the other vector
-   */
-  def addVector(other: BlsVector): Array[Int] = {
+class BlsVector(var list : Array[Int]) extends Serializable with Logging {
+  def addVector(other: BlsVector) = {
     assert(other.list.length == list.length)
-    (list, other.list).zipped.map(_ + _)
+    for (i <- 0 until list.length) {
+      list(i) += other.list(i)
+    }
+    this
   }
-
-  /**
-   * Add 1 to vector element-wise if bit in Byte is 1
-   * @param data
-   * @param len
-   */
-  def addByte(data: Byte, len: Int): Unit = {
+  def addByte(data: Byte, len: Int) = {
     assert(len == list.length)
     for (i <- 0 until len) {
-      list(i) += (0x1 & (data >> i))
+      list(i) += (0x1 & (data >> i));
     }
+    this
+  }
+  def getThresholdCount(idx: Int) = {
+    assert(idx < list.size)
+    list(idx)
   }
 
   override
-  def toString: String = {
-    var ret = list(0).toString
-    for (i <- 1 until list.length) {
-      ret += "," + list(i)
-    }
-    ret
+  def toString() : String = {
+    return list.mkString("\t");
   }
 
   override def hashCode: Int = {
@@ -52,11 +47,11 @@ class BlsVector(var list: Array[Int]) extends Serializable with Logging {
 }
 
 object BlsVectorFunctions {
-  def getBlsVectorFromByte(data: Byte, len: Int): BlsVector = {
-    val list = new Array[Int](len)
-    for (i <- 0 until len) {
-      list(i) = 0x1 & (data >> i)
+  def getBlsVectorFromByte(data: Byte, len: Int) : BlsVector = {
+    var list = Array.fill(len)(0)
+    for (i <- 0 to len - 1) {
+      list(i) = (0x1 & (data >> i));
     }
-    new BlsVector(list)
+    return new BlsVector(list)
   }
 }

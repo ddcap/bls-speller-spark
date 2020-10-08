@@ -6,19 +6,18 @@ import org.apache.spark.SparkContext
 import org.apache.hadoop.io.{LongWritable, Text}
 import org.apache.hadoop.conf.Configuration
 import scala.collection.mutable.ListBuffer
+import scala.collection.mutable.ArrayBuffer
 import org.apache.spark.storage.StorageLevel
 import be.ugent.intec.ddecap.Logging
 import java.util.StringTokenizer
-import scala.collection.mutable.ArrayBuffer
 import org.apache.log4j.Level
 import org.apache.log4j.Logger
 import org.apache.spark.BinaryPipedRDD
-import be.ugent.intec.ddecap.dna.BlsVector
-import be.ugent.intec.ddecap.dna.DnaStringFunctions._
-
 
 @SerialVersionUID(227L)
 class Tools(val bindir: String) extends Serializable with Logging {
+  type ContentWithMotifAndBls = (Array[Byte], (Array[Byte], Byte)) // TODO replace this where possible
+
   val binary = bindir + "/motifIterator"
   // TODO add options to the tool 3 degen and length range  6- 13, is hard coded right now
   val AlignmentBasedCommand = " AB "
@@ -32,8 +31,11 @@ class Tools(val bindir: String) extends Serializable with Logging {
     }
     buf
   }
-  private def toBinaryFormat(rdd: RDD[String]) : RDD[List[Byte]] = {
-    rdd.map(x => x.getBytes.toList)
+  private def toBinaryPairFormat(rdd: RDD[String]) : RDD[(Seq[Byte], (Seq[Byte], Byte))] = {
+    rdd.map(x => (x.getBytes, (Seq(), 0x0)))
+  }
+  private def toBinaryFormat(rdd: RDD[String]) : RDD[Array[Byte]] = {
+    rdd.map(x => x.getBytes)
   }
 
   def readOrthologousFamilies(input: String, sc: SparkContext): RDD[String] = {
@@ -52,7 +54,7 @@ class Tools(val bindir: String) extends Serializable with Logging {
         val N = tmp(i).toInt;
         ortho += tmp(i) + "\n"; // Count
         i+=1;
-        for(j <- 1 to N) {
+        for(j <- 0 until N) {
           ortho += tmp(i) + "\n"; // ortho name
           i+=1;
           ortho += tmp(i) + "\n"; // DNA string
@@ -69,46 +71,27 @@ class Tools(val bindir: String) extends Serializable with Logging {
     tokenize( binary + " - " + (if (alignmentBased) AlignmentBasedCommand else AlignmentFreeCommand) + " " + alphabet  + " " + thresholdList.mkString(",") + " " + maxDegen + " " + minMotifLen + " " + maxMotifLen)
   }
 
-  def iterateMotifs(input: RDD[String], alignmentBased: Boolean, alphabet: Int, maxDegen: Int, minMotifLen: Int, maxMotifLen: Int, partitions: Int, thresholdList: List[Float]) : RDD[(List[Byte], BlsVector)] = {
-    (new org.apache.spark.BinaryPipedRDD(toBinaryFormat(input), getCommand(alignmentBased, thresholdList, alphabet, maxDegen, minMotifLen, maxMotifLen), "motifIterator", (maxMotifLen >> 1) + 2 ))
-        .repartition(partitions)
-        .map(x => splitBinaryDataInMotifAndBlsVector(x, maxMotifLen))
-        .aggregateByKey(new BlsVector(Array.fill(thresholdList.size)(0)))(
-            seqOp = (v, b) => {
-              v.addByte(b, thresholdList.size)
-              v
-            },
-            combOp = (v1, v2) => {
-              v1.addVector(v2)
-              v1
-            })
+  def iterateMotifs(input: RDD[String], alignmentBased: Boolean, alphabet: Int,
+    maxDegen: Int, minMotifLen: Int, maxMotifLen: Int,
+    thresholdList: List[Float]) : RDD[(Seq[Byte], (Seq[Byte], Byte))] = {
+
+      // iterateMotifs (c++ binary) outputs binary data, per motif this content is given:
+      // 1 byte: length of motif
+      // x bytes: motif content group in binary format, length depends on first byte (length) where there's 2 characters per byte
+      // x bytes: motif itself in binary format
+      // 1 byte: bls vector, first bit is 1 if the bls sscore of this motif in this family is higher then the first threshold, and so on for up to 8 thresholds
+      // binary format:
+        // 2 charactes per byte:
+        //    4 bits per character:   T G C A
+        //                            x x x x -> 1 if that letter is in the iupac letter, 0 if not
+        //                      ie A: 0 0 0 1
+        //                      ie G: 0 1 0 0
+        //                      ie M: 0 0 1 1 // A or C
+
+    // this is formatted in a key value pair as follows:
+    // key: array[byte] -> first byte of length + motif content group
+    // value: (array[byte], byte) -> the content of the motif itself (without the length! as this is already in the key) + the bls byte
+    (new org.apache.spark.BinaryPipedRDD(toBinaryPairFormat(input), getCommand(alignmentBased, thresholdList, alphabet, maxDegen, minMotifLen, maxMotifLen), "motifIterator", maxMotifLen))
   }
 
-  def groupMotifsByGroup(input: RDD[(List[Byte], BlsVector)], maxMotifLen: Int) : RDD[(List[Byte], ListBuffer[(List[Byte], BlsVector)])] = {
-    input.map(x => {
-                (getGroupId(x._1, maxMotifLen), (x._1, x._2)) //length is now without the bls vector byte
-              }).aggregateByKey(new ListBuffer[(List[Byte], BlsVector)]())(
-                  seqOp = (list, element) => {
-                    list += element
-                  },
-                  combOp = (list1, list2) => {
-                    list1 ++ list2
-                  })
-  }
-
-  def processGroups(input: RDD[(List[Byte], ListBuffer[(List[Byte], BlsVector)])],
-      thresholdList: List[Float],
-      backgroundModelCount: Int, familyCountCutOff: Int, confidenceScoreCutOff: Double) : RDD[Int] = {
-    input.mapPartitions(x => {
-      // x is an iterator over the motifs+blsvector in this group
-      // TODO for every Threshold Ti:
-        // TODO calculate backgroundModel and F_BG(Ti)
-
-        // TODO for each motif calculate every F(Ti) and corresponding C(Ti)
-
-
-        // TODO emit motifs with their Ti and corresponding F(Ti) and C(Ti)
-      List(x.size).iterator
-    })
-  }
 }
