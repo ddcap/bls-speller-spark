@@ -1,6 +1,6 @@
 package be.ugent.intec.ddecap.dna
 
-import be.ugent.intec.ddecap.dna.DnaStringFunctions.dnaToString
+import be.ugent.intec.ddecap.dna.BinaryDnaStringFunctions.dnaToString
 import org.scalatest.funsuite.AnyFunSuite
 
 class DnaStringFunctionsTest extends AnyFunSuite {

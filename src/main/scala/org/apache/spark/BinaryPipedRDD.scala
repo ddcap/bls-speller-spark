@@ -1,23 +1,19 @@
 package org.apache.spark
 
 
-import org.apache.spark.rdd.HadoopPartition
-import scala.reflect.ClassTag
-import java.util.StringTokenizer
-import scala.collection.mutable.ArrayBuffer
-import scala.collection.JavaConverters._
-import org.apache.spark.util.Utils
-import java.io.{File, FilenameFilter, IOException, PrintWriter, OutputStreamWriter, BufferedWriter,DataOutputStream, BufferedInputStream}
-import scala.io.{Codec, Source}
-import java.util.concurrent.atomic.AtomicReference
-import org.apache.spark.rdd.RDD
-import scala.io.Codec.string2codec
-import org.apache.log4j.{Level, Logger}
-import be.ugent.intec.ddecap.dna.BinaryDnaStringFunctions._
-import scala.collection.mutable.ListBuffer
+import java.io.{DataOutputStream, File, FilenameFilter, IOException}
 import java.nio.ByteBuffer
 import java.nio.channels.Channels
-import scala.annotation.tailrec
+import java.util.concurrent.atomic.AtomicReference
+
+import org.apache.log4j.{Level, Logger}
+import org.apache.spark.rdd.{HadoopPartition, RDD}
+import org.apache.spark.util.Utils
+
+import scala.collection.JavaConverters._
+import scala.io.Codec.string2codec
+import scala.io.{Codec, Source}
+import scala.reflect.ClassTag
 
 // based on PipedRDD from Spark!
 class BinaryPipedRDD[T: ClassTag](
@@ -175,7 +171,7 @@ class BinaryPipedRDD[T: ClassTag](
         (grp.toVector, (wrd.toVector, buf.get))    // --> (array[byte] , (array[byte], byte ))
       }
       def hasNext(): Boolean = {
-        val result = if (buf.position + totalMotifSize <= buf.limit)
+        val result = if (buf.position() + totalMotifSize <= buf.limit())
           true
         else {
           buf.compact()

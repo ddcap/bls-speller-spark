@@ -13,13 +13,13 @@ class BlsVectorTest extends AnyFunSuite {
 
   test("testToString") {
     val result = new BlsVector(Array(1, 2, 3))
-    assert(result.toString() == "1,2,3")
+    assert(result.toString() == "1\t2\t3")
   }
 
   test("testAddVector") {
     val first = new BlsVector(Array(1, 2, 3))
     val result = first.addVector(new BlsVector(Array(4, 5, 6)))
-    assert(new BlsVector(result) == new BlsVector(Array(5, 7, 9)))
+    assert(result == new BlsVector(Array(5, 7, 9)))
   }
 
   test("testGetBlsVectorFromByte") {
