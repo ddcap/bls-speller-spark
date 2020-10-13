@@ -1,10 +1,10 @@
 package be.ugent.intec.ddecap.dna
 
-import be.ugent.intec.ddecap.dna.BlsVectorFunctions._
-import scala.collection.mutable.ListBuffer
 import org.apache.log4j._
-import collection.immutable.HashMap
+
 import scala.annotation.tailrec
+import scala.collection.immutable.HashMap
+import scala.collection.mutable.ListBuffer
 
 object BinaryDnaStringFunctions {
 
@@ -108,4 +108,30 @@ object BinaryDnaStringFunctions {
     }
     ret;
   }
+
+  def stringToDNA(data: String): Array[Byte] = {
+    val output = new Array[Byte](1 + (data.length.toDouble / 2).round.toInt)
+    // Add length string to start
+    output(0) = data.length.toByte
+    var current_byte : Byte = 0x0
+    var i = 0
+    for (char <- data) {
+      val index = byteToAscii.indexOf(char)
+      if (i % 2 == 0) {
+        // char_index = bytes (>> 4) & 0xf
+        // bytes =
+        current_byte = index.toByte
+      } else {
+        current_byte = (current_byte.toInt | index.toByte << 4).toByte
+        output(1+ (i-1) / 2) = current_byte
+      }
+      // add last unfinished byte if present
+      if (i % 2 == 0) {
+        output(1+ i / 2) = current_byte
+      }
+      i += 1
+    }
+    output
+  }
+
 }

@@ -1,8 +1,11 @@
 package be.ugent.intec.ddecap.dna
 
-import scala.collection.mutable.ListBuffer
 import be.ugent.intec.ddecap.Logging
 
+/**
+ * A vector of BLS scores represented as ints
+ * @param list Array of BLS scores
+ */
 @SerialVersionUID(232L)
 class BlsVector(var list : Array[Int]) extends Serializable with Logging {
   def addVector(other: BlsVector) = {
@@ -23,9 +26,23 @@ class BlsVector(var list : Array[Int]) extends Serializable with Logging {
     assert(idx < list.size)
     list(idx)
   }
+
   override
   def toString() : String = {
     return list.mkString("\t");
+  }
+
+  override def hashCode: Int = {
+    list.hashCode()
+  }
+
+  def canEqual(a: Any): Boolean = a.isInstanceOf[BlsVector]
+
+  override def equals(that: Any): Boolean = {
+    that match {
+      case that: BlsVector => that.canEqual(this) && this.list.deep == that.list.deep
+      case _ => false
+    }
   }
 }
 
