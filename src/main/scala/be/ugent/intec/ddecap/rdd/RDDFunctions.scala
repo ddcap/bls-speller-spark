@@ -46,7 +46,7 @@ object RDDFunctions {
         val data = x._2
         val bgmodel = generateBackgroundModel(key, backgroundModelCount)
         val median : BlsVector = getMedianPerThreshold(data, bgmodel, thresholdList.size)
-        logger.info(dnaToString(key) + " median: " + median)
+        // logger.info(dnaToString(key) + " median: " + median)
         val retlist = ListBuffer[(Seq[Byte], Byte, BlsVector, List[Float], Seq[Byte])]()
         for( d <- data) { // for each motif calculate every F(Ti) and corresponding C(Ti)
           val conf_score_vector = Array.fill(thresholdList.size)(0.0f)
@@ -60,7 +60,7 @@ object RDDFunctions {
               thresholds_passed = true;
             }
           }
-          logger.info(dnaWithoutLenToString(d._1, key(0)) + " " + d._2 + " " + conf_score_vector.toList)
+          // logger.info(dnaWithoutLenToString(d._1, key(0)) + " " + d._2 + " " + conf_score_vector.toList)
           if(thresholds_passed) retlist += ((d._1, key(0), d._2, conf_score_vector.toList, key))
         }
         retlist
