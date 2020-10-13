@@ -9,7 +9,7 @@ import scala.annotation.tailrec
 object BinaryDnaStringFunctions {
 
   private final val byteToAscii = Array(' ', 'A', 'C', 'M', 'G', 'R', 'S', 'V', 'T', 'W', 'Y', 'H', 'K', 'D', 'B', 'N')
-  val logger = Logger.getLogger(getClass().getName());
+  val logger = Logger.getLogger("be.ugent.intec.ddecap.dna.BinaryDnaStringFunctions");
 
   def generateBackgroundModel(key: Seq[Byte], backgroundModelCount: Int) : ListBuffer[Seq[Byte]] = {
     // generate x permutations of this key motif
@@ -24,9 +24,9 @@ object BinaryDnaStringFunctions {
     for (tmp <- 1 to backgroundModelCount) {
       val shuffledIdx = util.Random.shuffle[Int, IndexedSeq](0 until chars.size)
       // random order of chars
-      val newdata = new Array[Byte](key.size)
-      newdata(0) = key(0)
-      var idx = 1
+      val newdata = new Array[Byte](key.size - 1)
+      // newdata(0) = key(0) // in the motifs the size isn't recorded as this is present in the key...
+      var idx = 0
       var i = 0
       for (cidx <- shuffledIdx) {
         val c = chars(cidx)
@@ -69,11 +69,13 @@ object BinaryDnaStringFunctions {
     val bgmodelVectors = ListBuffer[BlsVector]()
     for(d <- data) { // for each motif calculate every F(Ti) and corresponding C(Ti)
       if(bgmodelMap.contains(d._1)) {
+      // logger.info("adding " + bgmodelMap(d._1) + " of " + d._2);
         for(i <- 0 until bgmodelMap(d._1)) {
           bgmodelVectors += d._2
         }
       }
     }
+    // logger.info("bgmodelVectors.size: " + bgmodelVectors.size);
     for (i <- bgmodelVectors.size until bgmodel.size) {
       bgmodelVectors += nulvector
     }
