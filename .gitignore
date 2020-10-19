@@ -11,3 +11,4 @@ project/target/
 src/test/resources/bin/*
 test-code.scala
 *.json
+output/
