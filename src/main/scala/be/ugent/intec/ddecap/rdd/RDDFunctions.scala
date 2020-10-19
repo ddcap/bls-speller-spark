@@ -12,7 +12,7 @@ import be.ugent.intec.ddecap.spark.DnaStringPartitioner
 import scala.collection.mutable.ListBuffer
 
 object RDDFunctions {
-  val logger = Logger.getLogger(getClass().getName());
+  val logger = Logger.getLogger("be.ugent.intec.ddecap.rdd.RDDFunctions");
   type ContentWithMotifAndBlsHashmap = (Array[Byte], HashMap[Array[Byte], BlsVector])
 
     def groupMotifsByGroup(input: RDD[(Seq[Byte], (Seq[Byte], Byte))], thresholdList: List[Float], partitions: Int) : RDD[(Seq[Byte], HashMap[Seq[Byte], BlsVector])] = {
@@ -40,27 +40,28 @@ object RDDFunctions {
 
     def processGroups(input: RDD[(Seq[Byte], HashMap[Seq[Byte], BlsVector])],
         thresholdList: List[Float],
-        backgroundModelCount: Int, familyCountCutOff: Int, confidenceScoreCutOff: Double) : RDD[(Seq[Byte], Byte, BlsVector, List[Float])] = {
+        backgroundModelCount: Int, familyCountCutOff: Int, confidenceScoreCutOff: Double) : RDD[(Seq[Byte], Byte, BlsVector, List[Float], Seq[Byte])] = {
       input.flatMap(x => { // x is an iterator over the motifs+blsvector in this group
         val key = x._1
         val data = x._2
         val bgmodel = generateBackgroundModel(key, backgroundModelCount)
         val median : BlsVector = getMedianPerThreshold(data, bgmodel, thresholdList.size)
-        // info("median: " + median)
-        val retlist = ListBuffer[(Seq[Byte], Byte, BlsVector, List[Float])]()
+        // logger.info(dnaToString(key) + " median: " + median)
+        val retlist = ListBuffer[(Seq[Byte], Byte, BlsVector, List[Float], Seq[Byte])]()
         for( d <- data) { // for each motif calculate every F(Ti) and corresponding C(Ti)
           val conf_score_vector = Array.fill(thresholdList.size)(0.0f)
           var thresholds_passed = false;
           for(t <- 0 until thresholdList.size) {  // for every Threshold Ti:
             val family_count_t = d._2.getThresholdCount(t) // F(Ti)
             val family_count_bg_t = median.getThresholdCount(t).toFloat
-            conf_score_vector(t) = if(family_count_t > family_count_bg_t) 1.0f - family_count_bg_t / family_count_t else 0.0f; // C(Ti)
+            conf_score_vector(t) = if(family_count_t > family_count_bg_t) (family_count_t - family_count_bg_t) / family_count_t else 0.0f; // C(Ti)
             if(family_count_t >= familyCountCutOff && conf_score_vector(t) >= confidenceScoreCutOff) {
               // emit motif if any Ti has a valid cutoff
               thresholds_passed = true;
             }
           }
-          if(thresholds_passed) retlist += ((d._1, x._1(0), d._2, conf_score_vector.toList))
+          // logger.info(dnaWithoutLenToString(d._1, key(0)) + " " + d._2 + " " + conf_score_vector.toList)
+          if(thresholds_passed) retlist += ((d._1, key(0), d._2, conf_score_vector.toList, key))
         }
         retlist
         })

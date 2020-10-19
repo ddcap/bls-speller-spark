@@ -178,7 +178,7 @@ class BinaryPipedRDD[T: ClassTag](
           bytesRead = channel.read(buf)
           if(bytesRead > 0){
             buf.flip()
-            info("read " + bytesRead + " valid bytes")
+            // info("read " + bytesRead + " valid bytes")
             true
           } else {
             val exitStatus = proc.waitFor()

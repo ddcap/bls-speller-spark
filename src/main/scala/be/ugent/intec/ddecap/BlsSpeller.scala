@@ -28,6 +28,7 @@ object BlsSpeller extends Logging {
       maxMotifLen: Int = 9,
       alphabet: Int = 2, // 0: exact, 1: exact+N, 2: exact+2fold+M, 3: All
       familyCountCutOff: Int = 1,
+      onlyiterate: Boolean = false,
       backgroundModelCount: Int = 1000,
       confidenceScoreCutOff: Double = 0.5,
       thresholdList: List[Float] = List(0.15f, 0.5f, 0.6f, 0.7f, 0.9f, 0.95f),
@@ -56,7 +57,23 @@ object BlsSpeller extends Logging {
         sc = spark.sparkContext
 
         info("serializer is " + sc.getConf.get("spark.serializer", "org.apache.spark.serializer.JavaSerializer"))
+
+
+        // val stageMetrics = ch.cern.sparkmeasure.StageMetrics(spark)
+        // stageMetrics.begin()
         runPipeline(config)
+        // stageMetrics.end()
+        // stageMetrics.printReport()
+        // stageMetrics.printAccumulables()
+        // val df = stageMetrics.createStageMetricsDF("PerfStageMetrics")
+        // deleteRecursively("/tmp/stagemetrics_test1");
+        // deleteRecursively("/tmp/stagemetrics_report_test2");
+        // stageMetrics.saveData(df.orderBy("jobId", "stageId"), "/tmp/stagemetrics_test1")
+        //
+        // val aggregatedDF = stageMetrics.aggregateStageMetrics("PerfStageMetrics")
+        // stageMetrics.saveData(aggregatedDF, "/tmp/stagemetrics_report_test2")
+
+
         sc.stop()
         spark.stop()
       case None => throw new Exception("arguments missing")
@@ -115,16 +132,18 @@ object BlsSpeller extends Logging {
       opt[Unit]("AB").action( (_, c) =>
         c.copy(alignmentBased = true) ).text("Alignment based motif discovery.")
 
+      opt[Unit]("onlyiterate").action( (_, c) =>
+        c.copy(onlyiterate = true) ).text("Only iterate motifs, without processing.")
     }
     parser.parse(args, Config())
   }
 
+  def toBinary(i: Int, digits: Int = 8) = "0000000" + i.toBinaryString takeRight digits
 
   def runPipeline(config: Config) : Unit = {
-
     Timer.startTime()
     var tools = new Tools(config.bindir);
-    var families = tools.readOrthologousFamilies(config.input, sc);
+    var families = tools.readOrthologousFamilies(config.input, config.partitions, sc);
 
     info("family count: " + families.count);
     val motifs = tools.iterateMotifs(families, config.alignmentBased, config.alphabet, config.maxDegen, config.minMotifLen, config.maxMotifLen, config.thresholdList);
@@ -136,7 +155,10 @@ object BlsSpeller extends Logging {
     // groupedMotifs.persist(config.persistLevel)
     // info("groupedMotifs count: " + groupedMotifs.count);
     deleteRecursively(config.output);
-    output.map(x => (dnaWithoutLenToString(x._1, x._2) + "\t" + x._3 + "\t" + x._4.mkString("\t"))).saveAsTextFile(config.output);
+    if(config.onlyiterate)
+      motifs.map(x => (x._1.map(b => toBinary(b, 8)).mkString(" ") + "\t" + x._2._1.map(b => toBinary(b, 8)).mkString(" ") + "\t" + toBinary(x._2._2, 8))).saveAsTextFile(config.output);
+    else
+      output.map(x => (dnaToString(x._5) + "\t" + dnaWithoutLenToString(x._1, x._2) + "\t" + x._3 + "\t" + x._4.map(_*100).mkString("\t"))).saveAsTextFile(config.output);
 
 // for testing can write other rdd's to output:
     // deleteRecursively(config.output + "-motifs");

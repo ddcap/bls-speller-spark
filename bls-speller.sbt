@@ -9,6 +9,7 @@ libraryDependencies += "org.apache.spark" %% "spark-core" % "2.4.5" % "provided"
 libraryDependencies += "org.apache.spark" %% "spark-sql" % "2.4.5" % "provided"
 // CLI parsing
 libraryDependencies += "com.github.scopt" %% "scopt" % "3.6.0"
+libraryDependencies += "ch.cern.sparkmeasure" %% "spark-measure" % "0.15"
 
 // Test framework
 // From https://www.scalatest.org/user_guide/using_scalatest_with_sbt

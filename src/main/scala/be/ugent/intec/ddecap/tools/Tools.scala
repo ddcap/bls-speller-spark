@@ -38,7 +38,7 @@ class Tools(val bindir: String) extends Serializable with Logging {
     rdd.map(x => x.getBytes)
   }
 
-  def readOrthologousFamilies(input: String, sc: SparkContext): RDD[String] = {
+  def readOrthologousFamilies(input: String, partitions: Int, sc: SparkContext): RDD[String] = {
     val tmp = sc.wholeTextFiles(input).flatMap(x => {
       val tmp = x._2.split("\n");
       val list: ListBuffer[String] = new ListBuffer[String]();
@@ -64,7 +64,7 @@ class Tools(val bindir: String) extends Serializable with Logging {
       }
       list
     })
-    tmp.repartition(tmp.count.toInt); //  too many partitions for whole file -> repartition based on size???! of the familiy (# characters)
+    tmp.repartition(partitions); //  too many partitions for whole file -> repartition based on size???! of the familiy (# characters)
   }
 
   def getCommand(alignmentBased: Boolean, thresholdList: List[Float], alphabet: Int, maxDegen: Int, minMotifLen: Int, maxMotifLen: Int) : Seq[String] = {
