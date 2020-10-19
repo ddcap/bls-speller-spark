@@ -1,15 +1,15 @@
 name := "bls-speller"
 
 version := "0.1"
-
 scalaVersion := "2.11.12"
+val sparkVersion = "2.4.5"
 
 // Apache Spark
-libraryDependencies += "org.apache.spark" %% "spark-core" % "2.4.5" % "provided"
-libraryDependencies += "org.apache.spark" %% "spark-sql" % "2.4.5" % "provided"
+libraryDependencies += "org.apache.spark" %% "spark-core" % sparkVersion % "provided"
+libraryDependencies += "org.apache.spark" %% "spark-sql" % sparkVersion % "provided"
 // CLI parsing
 libraryDependencies += "com.github.scopt" %% "scopt" % "3.6.0"
-libraryDependencies += "ch.cern.sparkmeasure" %% "spark-measure" % "0.15"
+libraryDependencies += "ch.cern.sparkmeasure" %% "spark-measure" % "0.17"
 
 // Test framework
 // From https://www.scalatest.org/user_guide/using_scalatest_with_sbt
@@ -19,8 +19,7 @@ logBuffered in Test := false
 // From http://www.scalacheck.org/
 libraryDependencies += "org.scalacheck" %% "scalacheck" % "1.14.1" % "test"
 // use spark-testing-base https://github.com/holdenk/spark-testing-base
-// TODO make dependent on Spark version
-libraryDependencies += "com.holdenkarau" %% "spark-testing-base" % "2.4.5_0.14.0" % "test"
+libraryDependencies += "com.holdenkarau" %% "spark-testing-base" % (sparkVersion + "_0.14.0") % "test"
 fork in Test := true
 javaOptions ++= Seq("-Xms512M", "-Xmx2048M", "-XX:MaxPermSize=2048M", "-XX:+CMSClassUnloadingEnabled")
 parallelExecution in Test := false
