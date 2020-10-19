@@ -1,22 +1,21 @@
 package be.ugent.intec.ddecap
 
-import org.apache.spark.sql.SparkSession
-import org.apache.spark.SparkContext
-import org.apache.spark.storage.StorageLevel
-import java.io._
-import scala.io.Source
-import java.util.zip._
-import org.apache.spark.rdd.RDD
-import org.apache.log4j.Logger
-import org.apache.log4j.Level
-import org.apache.spark.SparkConf;
-import be.ugent.intec.ddecap.tools.Tools;
-import be.ugent.intec.ddecap.rdd.RDDFunctions._;
-import be.ugent.intec.ddecap.tools.FileUtils._;
+import be.ugent.intec.ddecap.BlsSpeller.LoggingMode.{LoggingMode, NO_LOGGING, SPARK_MEASURE}
 import be.ugent.intec.ddecap.dna.BinaryDnaStringFunctions._
-
+import be.ugent.intec.ddecap.rdd.RDDFunctions._
+import be.ugent.intec.ddecap.tools.FileUtils._
+import be.ugent.intec.ddecap.tools.Tools
+import org.apache.log4j.{Level, Logger}
+import org.apache.spark.sql.SparkSession
+import org.apache.spark.storage.StorageLevel
+import org.apache.spark.{SparkConf, SparkContext}
 
 object BlsSpeller extends Logging {
+  object LoggingMode extends Enumeration {
+    type LoggingMode = Value
+    val NO_LOGGING, SPARK_MEASURE = Value
+  }
+
   case class Config(
       input: String = "",
       partitions: Int = 8,
@@ -32,7 +31,8 @@ object BlsSpeller extends Logging {
       backgroundModelCount: Int = 1000,
       confidenceScoreCutOff: Double = 0.5,
       thresholdList: List[Float] = List(0.15f, 0.5f, 0.6f, 0.7f, 0.9f, 0.95f),
-      persistLevel: StorageLevel = StorageLevel.MEMORY_AND_DISK
+      persistLevel: StorageLevel = StorageLevel.MEMORY_AND_DISK,
+      loggingMode: LoggingMode = LoggingMode.NO_LOGGING
     )
 
   var sc: SparkContext = null
@@ -58,22 +58,21 @@ object BlsSpeller extends Logging {
 
         info("serializer is " + sc.getConf.get("spark.serializer", "org.apache.spark.serializer.JavaSerializer"))
 
-
-        // val stageMetrics = ch.cern.sparkmeasure.StageMetrics(spark)
-        // stageMetrics.begin()
-        runPipeline(config)
-        // stageMetrics.end()
-        // stageMetrics.printReport()
-        // stageMetrics.printAccumulables()
-        // val df = stageMetrics.createStageMetricsDF("PerfStageMetrics")
-        // deleteRecursively("/tmp/stagemetrics_test1");
-        // deleteRecursively("/tmp/stagemetrics_report_test2");
-        // stageMetrics.saveData(df.orderBy("jobId", "stageId"), "/tmp/stagemetrics_test1")
-        //
-        // val aggregatedDF = stageMetrics.aggregateStageMetrics("PerfStageMetrics")
-        // stageMetrics.saveData(aggregatedDF, "/tmp/stagemetrics_report_test2")
-
-
+        deleteRecursively(config.output)
+        config.loggingMode match {
+          case NO_LOGGING => runPipeline(config)
+          case SPARK_MEASURE =>
+            val stageMetrics = ch.cern.sparkmeasure.StageMetrics(spark)
+            stageMetrics.begin()
+            runPipeline(config)
+            stageMetrics.end()
+            stageMetrics.printReport()
+            stageMetrics.printAccumulables()
+            val df = stageMetrics.createStageMetricsDF("PerfStageMetrics")
+            stageMetrics.saveData(df.orderBy("jobId", "stageId"), config.output + "/stageMetrics")
+            val aggregatedDF = stageMetrics.aggregateStageMetrics("PerfStageMetrics")
+            stageMetrics.saveData(aggregatedDF, config.output + "/aggregateStageMetrics")
+        }
         sc.stop()
         spark.stop()
       case None => throw new Exception("arguments missing")
@@ -127,6 +126,14 @@ object BlsSpeller extends Logging {
             case _ => c.copy(persistLevel = StorageLevel.MEMORY_AND_DISK)
           }
          ).text("Sets the persist level for RDD's: mem, mem_ser, mem_disk [default], mem_disk_ser, disk")
+
+      opt[String]("logging_mode").action( (x, c) =>
+        x match {
+          case "no_logging" => c.copy(loggingMode = LoggingMode.NO_LOGGING)
+          case "spark_measure" => c.copy(loggingMode = LoggingMode.SPARK_MEASURE)
+          case _ => c.copy(loggingMode = LoggingMode.NO_LOGGING)
+        }
+      ).text("Sets the logging mode: no_logging, spark_measure")
 
 
       opt[Unit]("AB").action( (_, c) =>
