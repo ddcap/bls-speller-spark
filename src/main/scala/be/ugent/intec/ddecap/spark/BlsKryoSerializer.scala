@@ -13,6 +13,7 @@ class BlsKryoSerializer extends KryoRegistrator {
     kryo.register(classOf[scala.reflect.ClassTag$$anon$1]);
     kryo.register(classOf[Array[org.apache.spark.sql.catalyst.InternalRow]]);
     kryo.register(classOf[org.apache.spark.sql.catalyst.InternalRow]);
+    kryo.register(classOf[org.apache.spark.sql.catalyst.expressions.UnsafeRow])
     kryo.register(classOf[org.apache.spark.sql.execution.datasources.WriteTaskResult]);
     kryo.register(classOf[org.apache.spark.sql.execution.datasources.ExecutedWriteSummary]);
     kryo.register(classOf[org.apache.spark.sql.execution.datasources.BasicWriteTaskStats]);
