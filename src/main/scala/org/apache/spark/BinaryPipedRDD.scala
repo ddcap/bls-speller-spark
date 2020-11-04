@@ -8,7 +8,7 @@ import java.util.concurrent.atomic.AtomicReference
 
 import org.apache.log4j.{Level, Logger}
 import org.apache.spark.rdd.{HadoopPartition, RDD}
-import org.apache.spark.util.Utils
+import org.apache.spark.util.{TaskCompletionListener, Utils}
 
 import scala.collection.JavaConverters._
 import scala.io.Codec.string2codec
@@ -134,8 +134,7 @@ class BinaryPipedRDD[T: ClassTag](
     }
     stdinWriterThread.start()
 
-    // interrupts stdin writer and stderr reader threads when the corresponding task is finished.
-    context.addTaskCompletionListener { _ =>
+    val listener : TaskCompletionListener = { _ =>
       if (proc.isAlive) {
         proc.destroy()
       }
@@ -147,6 +146,9 @@ class BinaryPipedRDD[T: ClassTag](
         stderrReaderThread.interrupt()
       }
     }
+
+    // interrupts stdin writer and stderr reader threads when the corresponding task is finished.
+    context.addTaskCompletionListener(listener)
 
     // reads data in stream, without loading it all to memory!! -> way more memory efficient
     // example data format with size of 8:
