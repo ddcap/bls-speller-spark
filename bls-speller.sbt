@@ -1,8 +1,8 @@
 name := "bls-speller"
 
 version := "0.1"
-scalaVersion := "2.11.12"
-val sparkVersion = "2.4.5"
+scalaVersion := "2.12.12"
+val sparkVersion = "3.0.0"
 
 // Apache Spark
 libraryDependencies += "org.apache.spark" %% "spark-core" % sparkVersion % "provided"

@@ -13,10 +13,12 @@ import java.util.StringTokenizer
 import org.apache.log4j.Level
 import org.apache.log4j.Logger
 import org.apache.spark.BinaryPipedRDD
+import java.nio.ByteBuffer
 
 @SerialVersionUID(227L)
 class Tools(val bindir: String) extends Serializable with Logging {
   type ContentWithMotifAndBls = (Array[Byte], (Array[Byte], Byte)) // TODO replace this where possible
+  type ImmutableDna = Vector[Byte]
 
   val binary = bindir + "/motifIterator"
   // TODO add options to the tool 3 degen and length range  6- 13, is hard coded right now
@@ -31,15 +33,39 @@ class Tools(val bindir: String) extends Serializable with Logging {
     }
     buf
   }
-  private def toBinaryPairFormat(rdd: RDD[String]) : RDD[(Seq[Byte], (Seq[Byte], Byte))] = {
-    rdd.map(x => (x.getBytes, (Seq(), 0x0)))
+  val longBytes = 8
+  private def toLongPairFormat(rdd: RDD[String]) : RDD[Iterator[(Long, (Long, Byte))]] = {
+    rdd.map(x => {
+      val famBuffer : ByteBuffer = ByteBuffer.wrap(x.getBytes)
+
+      new Iterator[(Long, (Long, Byte))] {
+        def next(): (Long, (Long, Byte)) = {
+          if (!hasNext()) {
+            throw new NoSuchElementException()
+          }
+          val onelong : Array[Byte] = Array.fill(8)(10); // 10 is newline!
+          famBuffer.get(onelong, 0,  Math.min(longBytes, famBuffer.limit() - famBuffer.position()))
+          (ByteBuffer.wrap(onelong).getLong(), (0, 0))
+        }
+        def hasNext(): Boolean = {
+          if (famBuffer.position() < famBuffer.limit())
+            true
+          else
+            false
+        }
+      }
+    })
+  }
+
+  private def toBinaryPairFormat(rdd: RDD[String]) : RDD[(ImmutableDna, (ImmutableDna, Byte))] = {
+    rdd.map(x => (x.getBytes.toVector, (Vector(), 0x0)))
   }
   private def toBinaryFormat(rdd: RDD[String]) : RDD[Array[Byte]] = {
     rdd.map(x => x.getBytes)
   }
 
   def readOrthologousFamilies(input: String, partitions: Int, sc: SparkContext): RDD[String] = {
-    val tmp = sc.wholeTextFiles(input).flatMap(x => {
+    val tmp = sc.wholeTextFiles(input, partitions).flatMap(x => {
       val tmp = x._2.split("\n");
       val list: ListBuffer[String] = new ListBuffer[String]();
       // split per ortho family
@@ -64,6 +90,7 @@ class Tools(val bindir: String) extends Serializable with Logging {
       }
       list
     })
+    // tmp
     tmp.repartition(partitions); //  too many partitions for whole file -> repartition based on size???! of the familiy (# characters)
   }
 
@@ -73,7 +100,7 @@ class Tools(val bindir: String) extends Serializable with Logging {
 
   def iterateMotifs(input: RDD[String], alignmentBased: Boolean, alphabet: Int,
     maxDegen: Int, minMotifLen: Int, maxMotifLen: Int,
-    thresholdList: List[Float]) : RDD[(Seq[Byte], (Seq[Byte], Byte))] = {
+    thresholdList: List[Float]) : RDD[(Long, (Long, Byte))] = {
 
       // iterateMotifs (c++ binary) outputs binary data, per motif this content is given:
       // 1 byte: length of motif
@@ -91,7 +118,8 @@ class Tools(val bindir: String) extends Serializable with Logging {
     // this is formatted in a key value pair as follows:
     // key: array[byte] -> first byte of length + motif content group
     // value: (array[byte], byte) -> the content of the motif itself (without the length! as this is already in the key) + the bls byte
-    (new org.apache.spark.BinaryPipedRDD(toBinaryPairFormat(input), getCommand(alignmentBased, thresholdList, alphabet, maxDegen, minMotifLen, maxMotifLen), "motifIterator", maxMotifLen))
+    (new org.apache.spark.BinaryPipedRDD(toLongPairFormat(input), getCommand(alignmentBased, thresholdList, alphabet,
+      maxDegen, minMotifLen, maxMotifLen), "motifIterator", maxMotifLen)).flatMap(identity)
   }
 
 }

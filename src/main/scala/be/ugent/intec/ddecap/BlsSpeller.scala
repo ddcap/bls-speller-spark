@@ -2,6 +2,7 @@ package be.ugent.intec.ddecap
 
 import be.ugent.intec.ddecap.BlsSpeller.LoggingMode.{LoggingMode, NO_LOGGING, SPARK_MEASURE}
 import be.ugent.intec.ddecap.dna.BinaryDnaStringFunctions._
+import be.ugent.intec.ddecap.dna.LongEncodedDna._
 import be.ugent.intec.ddecap.rdd.RDDFunctions._
 import be.ugent.intec.ddecap.tools.FileUtils._
 import be.ugent.intec.ddecap.tools.Tools
@@ -163,9 +164,10 @@ object BlsSpeller extends Logging {
     // info("groupedMotifs count: " + groupedMotifs.count);
     deleteRecursively(config.output);
     if(config.onlyiterate)
-      motifs.map(x => (x._1.map(b => toBinary(b, 8)).mkString(" ") + "\t" + x._2._1.map(b => toBinary(b, 8)).mkString(" ") + "\t" + toBinary(x._2._2, 8))).saveAsTextFile(config.output);
+      motifs.map(x => LongToDnaString(x._1) + "\t" + LongToDnaString(x._2._1, config.maxMotifLen - 1) + "\t" + toBinary(x._2._2)).saveAsTextFile(config.output);
+      // motifs.map(x => (x._1.map(b => toBinary(b, 8)).mkString(" ") + "\t" + x._2._1.map(b => toBinary(b, 8)).mkString(" ") + "\t" + toBinary(x._2._2, 8))).saveAsTextFile(config.output);
     else
-      output.map(x => (dnaToString(x._5) + "\t" + dnaWithoutLenToString(x._1, x._2) + "\t" + x._3 + "\t" + x._4.map(_*100).mkString("\t"))).saveAsTextFile(config.output);
+      output.map(x => (LongToDnaString(x._1, getDnaLength(x._4)) + "\t" + x._2 + "\t" + x._3.mkString("\t") + "\t")).saveAsTextFile(config.output);
 
 // for testing can write other rdd's to output:
     // deleteRecursively(config.output + "-motifs");

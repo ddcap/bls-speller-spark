@@ -24,18 +24,18 @@ class BinaryPipedRDD[T: ClassTag](
     var logLevel: Level = Level.INFO,
     envVars: Map[String, String] = scala.collection.immutable.Map(),
     separateWorkingDir: Boolean = false)
-  extends RDD[(Seq[Byte], (Seq[Byte], Byte))](prev) with be.ugent.intec.ddecap.Logging {
-
-
+  extends RDD[Iterator[(Long, (Long, Byte))]](prev) with be.ugent.intec.ddecap.Logging {
+  type ImmutableDna = Long
   class NotEqualsFileNameFilter(filterName: String) extends FilenameFilter {
     def accept(dir: File, name: String): Boolean = {
       !name.equals(filterName)
     }
   }
 
+  val longBytes = 8
   override def getPartitions: Array[Partition] = firstParent[T].partitions
 
-  override def compute(split: Partition, context: TaskContext): Iterator[(Seq[Byte],(Seq[Byte], Byte))] = {
+  override def compute(split: Partition, context: TaskContext): Iterator[Iterator[(ImmutableDna, (ImmutableDna, Byte))]] = {
 
     if(logLevel != null && logLevel != Level.ERROR) {
         Logger.getLogger("be.ugent.intec.ddecap").setLevel(logLevel)
@@ -95,7 +95,7 @@ class BinaryPipedRDD[T: ClassTag](
 
 
     // Start a thread to print the process's stderr to ours
-    val stderrReaderThread = new Thread(s"stderr reader for $cmd") {
+    val stderrReaderThread = new Thread(s"motifIterator-stderr") {
       override def run(): Unit = {
         val err = proc.getErrorStream
         try {
@@ -112,41 +112,46 @@ class BinaryPipedRDD[T: ClassTag](
     stderrReaderThread.start()
 
     // Start a thread to feed the process input from our parent's iterator
-    val stdinWriterThread = new Thread(s"stdin writer for $cmd") {
+    val stdinWriterThread = new Thread(s"motifIterator-stdin") {
       override def run(): Unit = {
         TaskContext.setTaskContext(context)
         var fsize = 0
         val out  = new DataOutputStream(proc.getOutputStream());
+        val longBuffer : ByteBuffer = ByteBuffer.allocate(longBytes);
 //        val out = new PrintWriter(new BufferedWriter(
 //          new OutputStreamWriter(proc.getOutputStream, Codec.defaultCharsetCodec.name), bufferSize))
         try {
-          for (elem <- firstParent[(Seq[Byte], _)].iterator(split, context)) {
-            fsize += elem._1.size
-            out.write(elem._1.toArray)
+          for (it <- firstParent[Iterator[(ImmutableDna, _)]].iterator(split, context)) {
+            for (elem <- it) {
+              longBuffer.putLong(0, elem._1);
+              out.write(longBuffer.array())
+              fsize += longBytes
+            }
           }
         } catch {
-          case t: Throwable => childThreadException.set(t)
+
+          case t: Throwable => {info("exception!?!?!" + t.toString() ); childThreadException.set(t)}
         } finally {
-          info("["+ split.index+ "] has written " + fsize + " to stdin")
           out.close()
+            info("["+ split.index+ "] has written " + fsize + " bytes to stdin")
         }
       }
     }
     stdinWriterThread.start()
 
     // interrupts stdin writer and stderr reader threads when the corresponding task is finished.
-    context.addTaskCompletionListener { _ =>
-      if (proc.isAlive) {
-        proc.destroy()
-      }
-
-      if (stdinWriterThread.isAlive) {
-        stdinWriterThread.interrupt()
-      }
-      if (stderrReaderThread.isAlive) {
-        stderrReaderThread.interrupt()
-      }
-    }
+    // context.addTaskCompletionListener {_ =>
+    //   if (proc.isAlive) {
+    //     proc.destroy()
+    //   }
+    //
+    //   if (stdinWriterThread.isAlive) {
+    //     stdinWriterThread.interrupt()
+    //   }
+    //   if (stderrReaderThread.isAlive) {
+    //     stderrReaderThread.interrupt()
+    //   }
+    // }
 
     // reads data in stream, without loading it all to memory!! -> way more memory efficient
     // example data format with size of 8:
@@ -154,21 +159,25 @@ class BinaryPipedRDD[T: ClassTag](
     // 8 - - - -  - - - -  bls
     val wordSize = (maxMotifLen >> 1)
     val totalMotifSize = 2 * wordSize + 2
-    val grp: Array[Byte] = Array.fill(wordSize + 1)(0x0);
-    val wrd: Array[Byte] = Array.fill(wordSize)(0x0);
+    val grp: Array[Byte] = Array.fill(longBytes)(0x0);
+    val wrd: Array[Byte] = Array.fill(longBytes)(0x0);
     val channel = Channels.newChannel(proc.getInputStream)
     val bufsize = totalMotifSize * 2048 // should be about best performance at this number
     val buf = ByteBuffer.allocate(bufsize);
+    var blsvec : Byte = 0;
     var bytesRead = channel.read(buf)
     buf.flip()
-    new Iterator[(Seq[Byte], (Seq[Byte], Byte))] {
-      def next(): (Seq[Byte], (Seq[Byte], Byte)) = {
+    List(new Iterator[(ImmutableDna, (ImmutableDna, Byte))] {
+      def next(): (ImmutableDna, (ImmutableDna, Byte)) = {
         if (!hasNext()) {
           throw new NoSuchElementException()
         }
-        buf.get(grp)
-        buf.get(wrd)            //    length + grp
-        (grp.toVector, (wrd.toVector, buf.get))    // --> (array[byte] , (array[byte], byte ))
+        buf.get(grp, 0, wordSize + 1)            // length + grp
+        buf.get(wrd, 0, wordSize + 1)            // wrd + blsvec
+        blsvec = wrd(wordSize)
+        wrd(wordSize) = 0 // needs to be set 0 so we can group by long instead of having the bls vector differentiating the same motif
+        // (grp.toVector, (wrd.toVector, buf.get))    // --> (array[byte] , (array[byte], byte ))
+        (ByteBuffer.wrap(grp).getLong(), (ByteBuffer.wrap(wrd).getLong(),blsvec))
       }
       def hasNext(): Boolean = {
         val result = if (buf.position() + totalMotifSize <= buf.limit())
@@ -216,7 +225,7 @@ class BinaryPipedRDD[T: ClassTag](
           throw t
         }
       }
-    }
+    }).iterator
 
   }
 }
