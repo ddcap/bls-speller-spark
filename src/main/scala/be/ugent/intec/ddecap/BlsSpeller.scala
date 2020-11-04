@@ -1,10 +1,12 @@
 package be.ugent.intec.ddecap
 
+import java.nio.file.{Files, Paths}
+
 import be.ugent.intec.ddecap.BlsSpeller.LoggingMode.{LoggingMode, NO_LOGGING, SPARK_MEASURE}
 import be.ugent.intec.ddecap.dna.BinaryDnaStringFunctions._
 import be.ugent.intec.ddecap.dna.LongEncodedDna._
 import be.ugent.intec.ddecap.rdd.RDDFunctions._
-import be.ugent.intec.ddecap.tools.FileUtils._
+import be.ugent.intec.ddecap.tools.FileUtils.deleteRecursively
 import be.ugent.intec.ddecap.tools.Tools
 import org.apache.log4j.{Level, Logger}
 import org.apache.spark.sql.SparkSession
@@ -57,9 +59,10 @@ object BlsSpeller extends Logging {
                                 .getOrCreate()
         sc = spark.sparkContext
 
+        info("Apache Spark verion is " + sc.version)
         info("serializer is " + sc.getConf.get("spark.serializer", "org.apache.spark.serializer.JavaSerializer"))
 
-        deleteRecursively(config.output)
+//        deleteRecursively(config.output)
         config.loggingMode match {
           case NO_LOGGING => runPipeline(config)
           case SPARK_MEASURE =>
@@ -88,7 +91,7 @@ object BlsSpeller extends Logging {
         c.copy(input = x) ).text("Location of the input files.").required()
 
       opt[String]('o', "output").action( (x, c) =>
-        c.copy(output = x) ).text("The output directory (spark output) or VCF output file (merged into a single file).").required()
+        c.copy(output = x)).text("The output directory (spark output) or VCF output file (merged into a single file).").required()
 
       opt[String]('b', "bindir").action( (x, c) =>
         c.copy(bindir = x) ).text("Location of the directory containing all binaries.").required()
@@ -162,7 +165,9 @@ object BlsSpeller extends Logging {
     // info("motifs count: " + motifs.count);
     // groupedMotifs.persist(config.persistLevel)
     // info("groupedMotifs count: " + groupedMotifs.count);
-    deleteRecursively(config.output);
+
+    val results_location = config.output + "/results"
+    deleteRecursively(results_location)
     if(config.onlyiterate)
       motifs.map(x => LongToDnaString(x._1) + "\t" + LongToDnaString(x._2._1, config.maxMotifLen - 1) + "\t" + toBinary(x._2._2)).saveAsTextFile(config.output);
       // motifs.map(x => (x._1.map(b => toBinary(b, 8)).mkString(" ") + "\t" + x._2._1.map(b => toBinary(b, 8)).mkString(" ") + "\t" + toBinary(x._2._2, 8))).saveAsTextFile(config.output);
