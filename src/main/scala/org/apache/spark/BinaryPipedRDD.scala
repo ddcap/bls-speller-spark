@@ -179,7 +179,7 @@ class BinaryPipedRDD[T: ClassTag](
         blsvec = wrd(wordSize)
         wrd(wordSize) = 0 // needs to be set 0 so we can group by long instead of having the bls vector differentiating the same motif
         // (grp.toVector, (wrd.toVector, buf.get))    // --> (array[byte] , (array[byte], byte ))
-        (ByteBuffer.wrap(grp).getLong(), (ByteBuffer.wrap(wrd).getLong(),blsvec))
+        (ByteBuffer.wrap(grp).getLong(), (ByteBuffer.wrap(wrd).getLong(), blsvec))
       }
       def hasNext(): Boolean = {
         val result = if (buf.position() + totalMotifSize <= buf.limit())

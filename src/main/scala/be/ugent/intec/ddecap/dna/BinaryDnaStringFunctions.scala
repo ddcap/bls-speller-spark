@@ -64,7 +64,7 @@ object BinaryDnaStringFunctions {
         }
       }
     }
-    logger.info("bgmodelVectors.size: " + bgmodelVectors.size);
+    // logger.info("bgmodelVectors.size: " + bgmodelVectors.size);
     for (i <- bgmodelVectors.size until bgmodel.size) {
       bgmodelVectors += nulvector
     }

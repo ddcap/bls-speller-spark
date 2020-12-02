@@ -38,6 +38,7 @@ object RDDFunctions {
           new DnaStringPartitioner(partitions), true) // mapsidecombine cannot be true with array as key....
     }
 
+    val emitRandomLowConfidenceScoreMotifs = 1000000;
     def processGroups(input: RDD[(ImmutableDna, HashMap[ImmutableDna, BlsVector])],
         thresholdList: List[Float],
         backgroundModelCount: Int, familyCountCutOff: Int, confidenceScoreCutOff: Double) :
@@ -45,6 +46,7 @@ object RDDFunctions {
       input.flatMap(x => { // x is an iterator over the motifs+blsvector in this group
         val key = x._1
         val data = x._2
+        val rnd = new scala.util.Random
         val bgmodel = generateBackgroundModel(key, backgroundModelCount)
         val median : BlsVector = getMedianPerThreshold(data, bgmodel, thresholdList.size)
         // logger.info(dnaToString(key) + " median: " + median)
@@ -59,6 +61,11 @@ object RDDFunctions {
             if(family_count_t >= familyCountCutOff && conf_score_vector(t) >= confidenceScoreCutOff) {
               // emit motif if any Ti has a valid cutoff
               thresholds_passed = true;
+            } else {
+              if (rnd.nextInt(emitRandomLowConfidenceScoreMotifs) == 0){
+                // logger.info("emitting motif below c threshold " + confidenceScoreCutOff + " for tests.")
+                thresholds_passed = true;
+              }
             }
           }
           // logger.info(dnaWithoutLenToString(d._1, key(0)) + " " + d._2 + " " + conf_score_vector.toList)

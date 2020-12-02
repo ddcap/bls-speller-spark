@@ -20,7 +20,10 @@ object BlsSpeller extends Logging {
   }
 
   case class Config(
+      mode: String = "getMotifs",
       input: String = "",
+      motifs: String = "",
+      fasta: String = "",
       partitions: Int = 8,
       alignmentBased: Boolean = false,
       bindir: String = "",
@@ -33,6 +36,7 @@ object BlsSpeller extends Logging {
       onlyiterate: Boolean = false,
       backgroundModelCount: Int = 1000,
       confidenceScoreCutOff: Double = 0.5,
+      printMotifs: Boolean = false,
       thresholdList: List[Float] = List(0.15f, 0.5f, 0.6f, 0.7f, 0.9f, 0.95f),
       persistLevel: StorageLevel = StorageLevel.MEMORY_AND_DISK,
       loggingMode: LoggingMode = LoggingMode.NO_LOGGING
@@ -84,7 +88,7 @@ object BlsSpeller extends Logging {
   }
 
   def parseOptionsAndStart(args: Array[String]) : Option[Config] = {
-    val parser = new scopt.OptionParser[Config]("bls speller") {
+    val parser = new scopt.OptionParser[Config]("bls-speller") {
       head("BLS Speller", "0.1")
 
       opt[String]('i', "input").action( (x, c) =>
@@ -99,26 +103,16 @@ object BlsSpeller extends Logging {
       opt[Int]('p', "partitions").action( (x, c) =>
         c.copy(partitions = x) ).text("Number of partitions used by executors.").required()
 
-      opt[Int]("alphabet").action( (x, c) =>
-        c.copy(alphabet = x) ).text("Sets the alphabet used in motif iterator: 0: Exact, 1: Exact+N, 2: Exact+2fold+M, 3: All. Default is 2.")
       opt[Int]("degen").action( (x, c) =>
-        c.copy(maxDegen = x) ).text("Sets the max number of degenerate characters.")
-      opt[Int]("min_len").action( (x, c) =>
-        c.copy(minMotifLen = x) ).text("Sets the minimum length of a motif.")
+        c.copy(maxDegen = x) ).text("Sets the max number of degenerate characters.").required()
       opt[Int]("max_len").action( (x, c) =>
-        c.copy(maxMotifLen = x) ).text("Sets the maximum length of a motif, this is not inclusive (i.e. length < maxLength).")
+        c.copy(maxMotifLen = x) ).text("Sets the maximum length of a motif, this is not inclusive (i.e. length < maxLength).").required()
+
       opt[Int]("fam_cutoff").action( (x, c) =>
         c.copy(familyCountCutOff = x) ).text("Sets the number of families a motif needs to be part of to be valid. Default is 1.")
-      opt[Int]("bg_model_count").action( (x, c) =>
-        c.copy(backgroundModelCount = x) ).text("Sets the count of motifs in the background model. Default is 1000.")
       opt[Double]("conf_cutoff").action( (x, c) =>
         c.copy(confidenceScoreCutOff = x) ).text("Sets the cutoff for confidence scores. Default is 0.5.")
 
-      opt[String]("bls_thresholds").action( (x, c) =>
-        {
-          val list = x.split(",").map(x => x.toFloat).toList
-          c.copy(thresholdList = list)
-        }).text("List of BLS threshold sepparated by a comma. Default is 0.15, 0.5, 0.6, 0.7, 0.9, 0.95. Currently a maximum of 8 thresholds is supported!")
 
       opt[String]("persist_level").action( (x, c) =>
           x match {
@@ -145,6 +139,38 @@ object BlsSpeller extends Logging {
 
       opt[Unit]("onlyiterate").action( (_, c) =>
         c.copy(onlyiterate = true) ).text("Only iterate motifs, without processing.")
+
+      opt[String]("bls_thresholds").action( (x, c) =>
+      {
+        val list = x.split(",").map(x => x.toFloat).toList
+        c.copy(thresholdList = list)
+      }).text("List of BLS threshold sepparated by a comma. Default is 0.15, 0.5, 0.6, 0.7, 0.9, 0.95. Currently a maximum of 8 thresholds is supported!")
+
+      // command to find motifs in ortho groups
+        cmd("getMotifs").action( (_, c) => c.copy(mode = "getMotifs") ).
+          text("get motifs of interest.").
+          children(
+            opt[Int]("alphabet").action( (x, c) =>
+              c.copy(alphabet = x) ).text("Sets the alphabet used in motif iterator: 0: Exact, 1: Exact+N, 2: Exact+2fold+M, 3: All. Default is 2."),
+            opt[Int]("min_len").action( (x, c) =>
+              c.copy(minMotifLen = x) ).text("Sets the minimum length of a motif.").required(),
+            opt[Int]("bg_model_count").action( (x, c) =>
+              c.copy(backgroundModelCount = x) ).text("Sets the count of motifs in the background model. Default is 1000.")
+
+
+          )
+        cmd("locateMotifs").action( (_, c) => c.copy(mode = "locateMotifs") ).
+          text("locates the found motifs in the given Ortho Groups.").
+          children(
+            opt[String]('m', "motifs").action( (x, c) =>
+              c.copy(motifs = x) ).text("Folder with the motifs found by the first step of BLS Speller.").required(),
+            opt[String]("fasta").action( (x, c) =>
+              c.copy(fasta = x) ).text("Provide a fasta file with genes and location in the genome. The output will now only be locations in this genome, with the motifs."),
+            opt[Unit]("printmotifs").action( (_, c) =>
+              c.copy(printMotifs = true) ).text("Also print all matching motifs per position.")
+
+
+          )
     }
     parser.parse(args, Config())
   }
@@ -155,31 +181,56 @@ object BlsSpeller extends Logging {
     Timer.startTime()
     var tools = new Tools(config.bindir);
     var families = tools.readOrthologousFamilies(config.input, config.partitions, sc);
-
     info("family count: " + families.count);
-    val motifs = tools.iterateMotifs(families, config.alignmentBased, config.alphabet, config.maxDegen, config.minMotifLen, config.maxMotifLen, config.thresholdList);
-    val groupedMotifs = groupMotifsByGroup(motifs, config.thresholdList, config.partitions);
-    val output = processGroups(groupedMotifs, config.thresholdList, config.backgroundModelCount, config.familyCountCutOff, config.confidenceScoreCutOff)
 
-    // motifs.persist(config.persistLevel)
-    // info("motifs count: " + motifs.count);
-    // groupedMotifs.persist(config.persistLevel)
-    // info("groupedMotifs count: " + groupedMotifs.count);
+    if(config.mode == "getMotifs") {
+      val motifs = tools.iterateMotifs(families, config.mode, config.alignmentBased, config.alphabet, config.maxDegen, config.minMotifLen, config.maxMotifLen, config.thresholdList);
+      val groupedMotifs = groupMotifsByGroup(motifs, config.thresholdList, config.partitions);
+      val output = processGroups(groupedMotifs, config.thresholdList, config.backgroundModelCount, config.familyCountCutOff, config.confidenceScoreCutOff)
 
-    val results_location = config.output + "/results"
-    deleteRecursively(results_location)
-    if(config.onlyiterate)
-      motifs.map(x => LongToDnaString(x._1) + "\t" + LongToDnaString(x._2._1, config.maxMotifLen - 1) + "\t" + toBinary(x._2._2)).saveAsTextFile(config.output);
-      // motifs.map(x => (x._1.map(b => toBinary(b, 8)).mkString(" ") + "\t" + x._2._1.map(b => toBinary(b, 8)).mkString(" ") + "\t" + toBinary(x._2._2, 8))).saveAsTextFile(config.output);
-    else
-      output.map(x => (LongToDnaString(x._1, getDnaLength(x._4)) + "\t" + x._2 + "\t" + x._3.mkString("\t") + "\t")).saveAsTextFile(config.output);
+      // motifs.persist(config.persistLevel)
+      // info("motifs count: " + motifs.count);
+      // groupedMotifs.persist(config.persistLevel)
+      // info("groupedMotifs count: " + groupedMotifs.count);
 
-// for testing can write other rdd's to output:
-    // deleteRecursively(config.output + "-motifs");
-    // motifs.map(x => dnaToString(x._1) + "\t" + dnaWithoutLenToString(x._2._1, 8) + "\t" + x._2._2.toBinaryString).saveAsTextFile(config.output + "-motifs");
-    // deleteRecursively(config.output + "-groupedmotifs");
-    // groupedMotifs.map(x => dnaToString(x._1) + "\n" + x._2.map(y => (dnaWithoutLenToString(y._1, 8), y._2)).mkString("\t")).saveAsTextFile(config.output + "-groupedmotifs");
+      deleteRecursively(config.output)
+      if(config.onlyiterate)
+        motifs.map(x => LongToDnaString(x._1) + "\t" + LongToDnaString(x._2._1, config.maxMotifLen - 1) + "\t" + toBinary(x._2._2)).saveAsTextFile(config.output);
+        // motifs.map(x => (x._1.map(b => toBinary(b, 8)).mkString(" ") + "\t" + x._2._1.map(b => toBinary(b, 8)).mkString(" ") + "\t" + toBinary(x._2._2, 8))).saveAsTextFile(config.output);
+      else
+        output.map(x => (LongToDnaString(x._1, getDnaLength(x._4)) + "\t" + x._2 + "\t" + x._3.mkString("\t") + "\t")).saveAsTextFile(config.output);
 
-    info(Timer.measureTotalTime("BlsSpeller"))
+  // for testing can write other rdd's to output:
+      // deleteRecursively(config.output + "-motifs");
+      // motifs.map(x => dnaToString(x._1) + "\t" + dnaWithoutLenToString(x._2._1, 8) + "\t" + x._2._2.toBinaryString).saveAsTextFile(config.output + "-motifs");
+      // deleteRecursively(config.output + "-groupedmotifs");
+      // groupedMotifs.map(x => dnaToString(x._1) + "\n" + x._2.map(y => (dnaWithoutLenToString(y._1, 8), y._2)).mkString("\t")).saveAsTextFile(config.output + "-groupedmotifs");
+
+      info(Timer.measureTotalTime("BlsSpeller"))
+    } else if(config.mode == "locateMotifs") {
+      val motifs = tools.loadMotifs(config.motifs, config.partitions, sc, config.thresholdList, config.familyCountCutOff, config.confidenceScoreCutOff);
+      val broadcastMotifs = sc.broadcast(motifs.sortBy(identity).collect)
+      info("motif count after filter: " + broadcastMotifs.value.size);
+      val motifLocations = tools.locateMotifs(families, config.mode, broadcastMotifs, config.alignmentBased, config.maxDegen, config.maxMotifLen, config.thresholdList);
+
+      deleteRecursively(config.output)
+      if(config.fasta == "") {
+        motifLocations.sortBy(_._1).map(x => x._1._1 + '\t' + x._1._2 + '\t' + x._2).saveAsTextFile(config.output);
+      } else {
+        // read the fasta file and get position in genome -> RDD[(gene_id, start_pos, end_pos)]
+        if(config.printMotifs) {
+          // Includes motiflist per location:
+          val genomeLocations = tools.joinFastaAndLocationsWithMotifs(config.fasta, config.partitions, sc, motifLocations, config.maxMotifLen)
+          genomeLocations.sortBy(x=> x._1).map(x => x._1._1 + '\t' + x._1._2 + '\t' + (x._1._2 + config.maxMotifLen - 1)  + '\t' + x._2._1 + '\t' + x._2._2).saveAsTextFile(config.output);
+        } else {
+          val genomeLocations = tools.joinFastaAndLocations(config.fasta, config.partitions, sc, motifLocations, config.maxMotifLen)
+          genomeLocations.sortBy(x=> x._1).map(x => x._1._1 + '\t' + x._1._2 + '\t' + (x._1._2 + config.maxMotifLen - 1)  + '\t' + x._2).saveAsTextFile(config.output);
+        }
+
+      }
+      info(Timer.measureTotalTime("BlsSpeller - locate Motifs"))
+    } else {
+      throw new Exception("invalid command")
+    }
   }
 }

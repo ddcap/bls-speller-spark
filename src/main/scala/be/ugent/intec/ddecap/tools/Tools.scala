@@ -2,6 +2,7 @@ package be.ugent.intec.ddecap.tools
 
 
 import org.apache.spark.rdd.RDD
+import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.SparkContext
 import org.apache.hadoop.io.{LongWritable, Text}
 import org.apache.hadoop.conf.Configuration
@@ -19,6 +20,32 @@ import java.nio.ByteBuffer
 class Tools(val bindir: String) extends Serializable with Logging {
   type ContentWithMotifAndBls = (Array[Byte], (Array[Byte], Byte)) // TODO replace this where possible
   type ImmutableDna = Vector[Byte]
+
+  val ComplementTable = Map(
+    'A' -> 'T',
+    'B' -> 'V',
+    'C' -> 'G',
+    'D' -> 'H',
+    'G' -> 'C',
+    'H' -> 'D',
+    'M' -> 'K',
+    'K' -> 'M',
+    'N' -> 'N',
+    'R' -> 'Y',
+    'S' -> 'S',
+    'T' -> 'A',
+    'V' -> 'B',
+    'W' -> 'W',
+    'Y' -> 'R'
+  )
+
+  def reverseComplement(in: String) : String = {
+    var ret = ""
+    for (i <- in.size -1 to 0 by -1) {
+      ret += ComplementTable(in(i))
+    }
+    ret
+  }
 
   val binary = bindir + "/motifIterator"
   // TODO add options to the tool 3 degen and length range  6- 13, is hard coded right now
@@ -94,11 +121,104 @@ class Tools(val bindir: String) extends Serializable with Logging {
     tmp.repartition(partitions); //  too many partitions for whole file -> repartition based on size???! of the familiy (# characters)
   }
 
-  def getCommand(alignmentBased: Boolean, thresholdList: List[Float], alphabet: Int, maxDegen: Int, minMotifLen: Int, maxMotifLen: Int) : Seq[String] = {
-    tokenize( binary + " - " + (if (alignmentBased) AlignmentBasedCommand else AlignmentFreeCommand) + " " + alphabet  + " " + thresholdList.mkString(",") + " " + maxDegen + " " + minMotifLen + " " + maxMotifLen)
+  def getGeneMap(fasta: String, partitions: Int, sc: SparkContext): RDD[(String, (String, Int, Int))] = {
+    val genesToKeep = sc.textFile(fasta, partitions).filter(x => x.startsWith(">")).map(x => {
+      val tmp = x.split(":")
+      val range = tmp(3).split("-")
+      (tmp(0).substring(1), (tmp(2), range(0).toInt + 1, range(1).toInt)) // start is not inclusive, so actually starts one further, the end is inclusive so should be correct
+    })
+    genesToKeep
   }
 
-  def iterateMotifs(input: RDD[String], alignmentBased: Boolean, alphabet: Int,
+  def joinFastaAndLocations(fasta: String, partitions: Int, sc: SparkContext, motifLocations: RDD[((String, Int), String)], maxMotifLen: Int): RDD[((String, Int), Double)] = {
+    val geneMap =  getGeneMap(fasta, partitions, sc)
+    info("genes count: " + geneMap.count);
+
+    val geneLocationsInFasta = geneMap.join(
+      motifLocations.map(x =>
+        (x._1._1,
+          (x._1._2, x._2.split(";").map(x => x.split(":")(1).toDouble).max )
+        )
+      )
+    )
+    // returns: [(string, ((string, int,  int), (int,         string)))]
+    //            motif     chr     start end    pos_in_gene  (motif:blsscore) -list
+    // filter based on the gene list of that fasta file
+
+
+    geneLocationsInFasta.map(x => {
+      ((x._2._1._1,
+        if(x._2._2._1 > 0) x._2._1._2 + x._2._2._1 else x._2._1._3 + x._2._2._1 - (maxMotifLen - 1) + 1), // TODO assumes only a single length of motifs are used!!
+          x._2._2._2
+        )
+    }).reduceByKey((x, y) => {
+        if(x > y) x else y
+    })
+  }
+
+  def joinFastaAndLocationsWithMotifs(fasta: String, partitions: Int, sc: SparkContext, motifLocations: RDD[((String, Int), String)], maxMotifLen: Int): RDD[((String, Int), (String,Double))] = {
+    val geneMap =  getGeneMap(fasta, partitions, sc)
+    info("genes count: " + geneMap.count);
+
+    val geneLocationsInFasta = geneMap.join(motifLocations.map(x => (x._1._1, (x._1._2, x._2))))
+    // returns: [(string, ((string, int,  int), (int,         string)))]
+    //            motif     chr     start end    pos_in_gene  (motif:blsscore) -list
+    // filter based on the gene list of that fasta file
+
+
+    geneLocationsInFasta.map(x => {
+      ((x._2._1._1,
+        if(x._2._2._1 > 0) x._2._1._2 + x._2._2._1 else x._2._1._3 + x._2._2._1 - (maxMotifLen - 1) + 1), // TODO assumes only a single length of motifs are used!!
+            // get a list of motifs mapped to the location like this:
+            ( if(x._2._2._1 > 0) x._2._2._2.split(";").map(x => x.split(":")(0)).mkString(";") else x._2._2._2.split(";").map(x => reverseComplement(x.split(":")(0))).mkString(";"),
+          x._2._2._2.split(";").map(x => x.split(":")(1).toDouble).max
+        ))
+    }).reduceByKey((x, y) => {
+      (x._1  +  ";" + y._1,
+        if(x._2 > y._2) x._2 else y._2)
+    })
+  }
+
+  def getCommand(mode: String, alignmentBased: Boolean, thresholdList: List[Float], alphabet: Int, maxDegen: Int, minMotifLen: Int, maxMotifLen: Int) : Seq[String] = {
+    mode match {
+      case "getMotifs" => tokenize( binary + " - " + (if (alignmentBased) AlignmentBasedCommand else AlignmentFreeCommand) + " " + alphabet  + " " +
+                           thresholdList.mkString(",") + " " + maxDegen + " " + minMotifLen + " " + maxMotifLen)
+      case "locateMotifs" => tokenize( binary + " - " + (if (alignmentBased) AlignmentBasedCommand else AlignmentFreeCommand) + " " +
+                           thresholdList.mkString(",") + " " + maxDegen + " " + maxMotifLen)
+      case _ => throw new Exception("invalid Mode")
+    }
+  }
+
+  def loadMotifs(input: String, partitions: Int, sc: SparkContext, thresholdList: List[Float], fam_cutoff: Int, conf_cutoff:  Double) = {
+    val tmp = sc.textFile(input, partitions).flatMap(x => {
+      val tmp = x.split("\t")
+      var column = 0;
+      while(column < thresholdList.size && (tmp(column + 1).toInt < fam_cutoff || tmp(column + 1 + thresholdList.size).toDouble < conf_cutoff)) {
+        column+=1;
+      }
+      if (column < thresholdList.size) Some(tmp(0) + "\t" + column)  else None
+    })
+
+    tmp
+  }
+
+  def locateMotifs(families: RDD[String], mode: String, motifs: Broadcast[Array[String]], alignmentBased: Boolean,
+    maxDegen: Int, maxMotifLen: Int, thresholdList: List[Float]) : RDD[((String, Int), String)] = {
+
+    val preppedFamiliesAndMotifs = families.map(x => x + motifs.value.mkString("\n") + "\n")
+    val motifWithLocations = preppedFamiliesAndMotifs.pipe(getCommand(mode, alignmentBased, thresholdList, 0, maxDegen, 0, maxMotifLen))
+    val locations = motifWithLocations.flatMap(x => {
+      val split = x.split("\t")
+      split(2).split(";").map(y => {
+        val tmp = y.split("@")
+        ((tmp(0), tmp(1).toInt), split(0) + ":" + split(1))
+      })
+    })
+
+    locations.reduceByKey(_ + ";" + _)
+  }
+
+  def iterateMotifs(input: RDD[String], mode: String, alignmentBased: Boolean, alphabet: Int,
     maxDegen: Int, minMotifLen: Int, maxMotifLen: Int,
     thresholdList: List[Float]) : RDD[(Long, (Long, Byte))] = {
 
@@ -118,7 +238,7 @@ class Tools(val bindir: String) extends Serializable with Logging {
     // this is formatted in a key value pair as follows:
     // key: array[byte] -> first byte of length + motif content group
     // value: (array[byte], byte) -> the content of the motif itself (without the length! as this is already in the key) + the bls byte
-    (new org.apache.spark.BinaryPipedRDD(toLongPairFormat(input), getCommand(alignmentBased, thresholdList, alphabet,
+    (new org.apache.spark.BinaryPipedRDD(toLongPairFormat(input), getCommand(mode, alignmentBased, thresholdList, alphabet,
       maxDegen, minMotifLen, maxMotifLen), "motifIterator", maxMotifLen)).flatMap(identity)
   }
 
