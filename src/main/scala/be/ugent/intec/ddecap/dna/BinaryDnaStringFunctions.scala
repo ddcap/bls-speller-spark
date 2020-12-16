@@ -12,25 +12,92 @@ object BinaryDnaStringFunctions {
   private final val byteToAscii = Array(' ', 'A', 'C', 'M', 'G', 'R', 'S', 'V', 'T', 'W', 'Y', 'H', 'K', 'D', 'B', 'N')
   val logger = Logger.getLogger("be.ugent.intec.ddecap.dna.BinaryDnaStringFunctions");
   type ImmutableDna = Long
+  private val similarityCountfactor = 5;
 
-  def generateBackgroundModel(key: ImmutableDna, backgroundModelCount: Int) : ListBuffer[ImmutableDna] = {
+  def generateBackgroundModel(key: ImmutableDna, backgroundModelCount: Int, similarityScore: Int): ListBuffer[ImmutableDna] = {
+    similarityScore match {
+      case 0 => {
+        generateDissimilarBackgroundModel(key, backgroundModelCount, binaryHammingSimilarityScore)
+      }
+      case 1 => {
+        generateDissimilarBackgroundModel(key, backgroundModelCount, hammingSimilarityScore)
+      }
+      case 2 => {
+        generateDissimilarBackgroundModel(key, backgroundModelCount, levenshteinSimilarityScore)
+      }
+      case _ => {
+        generateBackgroundModel(key, backgroundModelCount)
+      }
+    }
+  }
+
+  private def generateDissimilarBackgroundModel(key: ImmutableDna, backgroundModelCount: Int, similarityScore: (Long, Long, Int) => Long) : ListBuffer[ImmutableDna] = {
+    val bgmodel = generateBackgroundModel(key, similarityCountfactor*backgroundModelCount)
+    val orderedbgmodel = orderByDissimilarityScore(bgmodel, getDnaLength(key), similarityScore)
+    orderedbgmodel.take(backgroundModelCount)
+  }
+
+  private def generateBackgroundModel(key: ImmutableDna, backgroundModelCount: Int) : ListBuffer[ImmutableDna] = {
     // generate x permutations of this key motif
     val ret = ListBuffer[ImmutableDna]()
     val chars = getDnaContent(key)
-    for (tmp <- 1 to backgroundModelCount) {
+    for (tmp <- 0 until backgroundModelCount) {
       val shuffledIdx = util.Random.shuffle[Int, IndexedSeq](0 until chars.size)
       // random order of chars
       var newdata: Long = 0
       var i = 0
       for (cidx <- shuffledIdx) {
-        val c = chars(cidx).toLong
-        newdata |= (c << (60 - (4*i))).toLong
+        val c = chars(cidx)
+        newdata |= (c << (60 - (4*i))).toLong // 60 here since no length
         i+= 1
       }
       // logger.info("bg long: " + newdata.toBinaryString)
       ret += newdata;
     }
     ret
+  }
+
+  def bitCount(x: Long) : Long =  {
+    var i = x
+    i - ((i >>> 1) & 0x5555555555555555L);
+    i = (i & 0x3333333333333333L) + ((i >>> 2) & 0x3333333333333333L);
+    i = (i + (i >>> 4)) & 0x0f0f0f0f0f0f0f0fL;
+    i = i + (i >>> 8);
+    i = i + (i >>> 16);
+    i = i + (i >>> 32);
+    return i & 0x7f;
+  }
+  def binaryHammingSimilarityScore(motifa: Long, motifb: Long, len: Int) : Long = {
+    var ret = bitCount((motifa^motifb) >> ((16-len)<<2)) // shift to right in order to eliminate problems with leftover 1s in that part
+    ret.toInt
+  }
+  def levenshteinSimilarityScore(motifa: Long, motifb: Long, len: Int) : Long = {
+    var a = (0 until len).toList
+    var b = (0 until len).toList
+
+    ((0 to b.size).toList /: a)((prev, x) =>
+     (prev zip prev.tail zip b).scanLeft(prev.head + 1) {
+         case (h, ((d, v), y)) => math.min(math.min(h + 1, v + 1), d + (if (((motifa >> (60 -4*x)) & 0xf) == ((motifb >> (60 -4*y)) & 0xf)) 0 else 1))
+       }).last
+  }
+  def hammingSimilarityScore(motifa: Long, motifb: Long, len: Int) : Long = {
+    var count = 0L
+    var xor = (motifa ^ motifb) >> ((16-len)<<2);
+    for (i <- 0 until len) {
+      if ( (xor & 0xf) > 0) {
+        count += 1
+      }
+      xor = xor >> 4;
+    }
+    count
+  }
+
+  def orderByDissimilarityScore(bgmodel: ListBuffer[ImmutableDna], motiflen: Int, similarityScore: (Long, Long, Int) => Long) : ListBuffer[ImmutableDna] = {
+    val tmp = bgmodel.map(x => {
+      val s : Double = bgmodel.map(y => similarityScore(x,y, motiflen)).sum
+      (x, s/bgmodel.size)
+    })
+    tmp.sortBy(-_._2).map(_._1)
   }
 
 

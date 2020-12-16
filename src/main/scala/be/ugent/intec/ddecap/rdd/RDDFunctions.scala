@@ -38,16 +38,17 @@ object RDDFunctions {
           new DnaStringPartitioner(partitions), true) // mapsidecombine cannot be true with array as key....
     }
 
-    val emitRandomLowConfidenceScoreMotifs = 1000000;
+    val emitRandomLowConfidenceScoreMotifs = 100000;
     def processGroups(input: RDD[(ImmutableDna, HashMap[ImmutableDna, BlsVector])],
         thresholdList: List[Float],
-        backgroundModelCount: Int, familyCountCutOff: Int, confidenceScoreCutOff: Double) :
+        backgroundModelCount: Int, similarityScore: Int,
+        familyCountCutOff: Int, confidenceScoreCutOff: Double) :
         RDD[(ImmutableDna, BlsVector, List[Float], ImmutableDna)] = {
       input.flatMap(x => { // x is an iterator over the motifs+blsvector in this group
         val key = x._1
         val data = x._2
         val rnd = new scala.util.Random
-        val bgmodel = generateBackgroundModel(key, backgroundModelCount)
+        val bgmodel = generateBackgroundModel(key, backgroundModelCount, similarityScore)
         val median : BlsVector = getMedianPerThreshold(data, bgmodel, thresholdList.size)
         // logger.info(dnaToString(key) + " median: " + median)
         val retlist = ListBuffer[(ImmutableDna, BlsVector, List[Float], ImmutableDna)]()

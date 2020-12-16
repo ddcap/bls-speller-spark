@@ -34,6 +34,7 @@ object BlsSpeller extends Logging {
       alphabet: Int = 2, // 0: exact, 1: exact+N, 2: exact+2fold+M, 3: All
       familyCountCutOff: Int = 1,
       onlyiterate: Boolean = false,
+      similarityScore: Int = -1,
       backgroundModelCount: Int = 1000,
       confidenceScoreCutOff: Double = 0.5,
       printMotifs: Boolean = false,
@@ -155,7 +156,9 @@ object BlsSpeller extends Logging {
             opt[Int]("min_len").action( (x, c) =>
               c.copy(minMotifLen = x) ).text("Sets the minimum length of a motif.").required(),
             opt[Int]("bg_model_count").action( (x, c) =>
-              c.copy(backgroundModelCount = x) ).text("Sets the count of motifs in the background model. Default is 1000.")
+              c.copy(backgroundModelCount = x) ).text("Sets the count of motifs in the background model. Default is 1000."),
+            opt[Int]("similarity_score").action( (x, c) =>
+              c.copy(similarityScore = x) ).text("Uses a similarity score to find the most dissimilar motifs in the background model. 0: Binary diff, 1: Hamming distance, 2: Levenshtein distance, Default is -1 [disabled].")
 
 
           )
@@ -186,7 +189,7 @@ object BlsSpeller extends Logging {
     if(config.mode == "getMotifs") {
       val motifs = tools.iterateMotifs(families, config.mode, config.alignmentBased, config.alphabet, config.maxDegen, config.minMotifLen, config.maxMotifLen, config.thresholdList);
       val groupedMotifs = groupMotifsByGroup(motifs, config.thresholdList, config.partitions);
-      val output = processGroups(groupedMotifs, config.thresholdList, config.backgroundModelCount, config.familyCountCutOff, config.confidenceScoreCutOff)
+      val output = processGroups(groupedMotifs, config.thresholdList, config.backgroundModelCount, config.similarityScore, config.familyCountCutOff, config.confidenceScoreCutOff)
 
       // motifs.persist(config.persistLevel)
       // info("motifs count: " + motifs.count);
