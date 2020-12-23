@@ -37,7 +37,6 @@ object BlsSpeller extends Logging {
       similarityScore: Int = -1,
       backgroundModelCount: Int = 1000,
       confidenceScoreCutOff: Double = 0.5,
-      printMotifs: Boolean = false,
       thresholdList: List[Float] = List(0.15f, 0.5f, 0.6f, 0.7f, 0.9f, 0.95f),
       persistLevel: StorageLevel = StorageLevel.MEMORY_AND_DISK,
       loggingMode: LoggingMode = LoggingMode.NO_LOGGING
@@ -168,10 +167,7 @@ object BlsSpeller extends Logging {
             opt[String]('m', "motifs").action( (x, c) =>
               c.copy(motifs = x) ).text("Folder with the motifs found by the first step of BLS Speller.").required(),
             opt[String]("fasta").action( (x, c) =>
-              c.copy(fasta = x) ).text("Provide a fasta file with genes and location in the genome. The output will now only be locations in this genome, with the motifs."),
-            opt[Unit]("printmotifs").action( (_, c) =>
-              c.copy(printMotifs = true) ).text("Also print all matching motifs per position.")
-
+              c.copy(fasta = x) ).text("Provide a fasta file with genes and location in the genome. The output will now only be locations in this genome, with the motifs.")
 
           )
     }
@@ -221,15 +217,8 @@ object BlsSpeller extends Logging {
         motifLocations.sortBy(_._1).map(x => x._1._1 + '\t' + x._1._2 + '\t' + x._2).saveAsTextFile(config.output);
       } else {
         // read the fasta file and get position in genome -> RDD[(gene_id, start_pos, end_pos)]
-        if(config.printMotifs) {
-          // Includes motiflist per location:
-          val genomeLocations = tools.joinFastaAndLocationsWithMotifs(config.fasta, config.partitions, sc, motifLocations, config.maxMotifLen)
-          genomeLocations.sortBy(x=> x._1).map(x => x._1._1 + '\t' + x._1._2 + '\t' + (x._1._2 + config.maxMotifLen - 1)  + '\t' + x._2._1 + '\t' + x._2._2).saveAsTextFile(config.output);
-        } else {
-          val genomeLocations = tools.joinFastaAndLocations(config.fasta, config.partitions, sc, motifLocations, config.maxMotifLen)
-          genomeLocations.sortBy(x=> x._1).map(x => x._1._1 + '\t' + x._1._2 + '\t' + (x._1._2 + config.maxMotifLen - 1)  + '\t' + x._2).saveAsTextFile(config.output);
-        }
-
+        val genomeLocations = tools.joinFastaAndLocations(config.fasta, config.partitions, sc, motifLocations, config.maxMotifLen)
+        genomeLocations.sortBy(x=> x._1).map(x => x._1._1 + '\t' + x._1._2 + '\t' + (x._1._2 + config.maxMotifLen - 1)  + '\t' + x._2._2 + '\t' + x._2._1).saveAsTextFile(config.output);
       }
       info(Timer.measureTotalTime("BlsSpeller - locate Motifs"))
     } else {

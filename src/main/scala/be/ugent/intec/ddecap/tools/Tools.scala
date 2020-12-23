@@ -21,6 +21,23 @@ class Tools(val bindir: String) extends Serializable with Logging {
   type ContentWithMotifAndBls = (Array[Byte], (Array[Byte], Byte)) // TODO replace this where possible
   type ImmutableDna = Vector[Byte]
 
+  val DegenerationTable = Map(
+    'A' -> 1,
+    'B' -> 3,
+    'C' -> 1,
+    'D' -> 3,
+    'G' -> 1,
+    'H' -> 3,
+    'M' -> 2,
+    'K' -> 2,
+    'N' -> 4,
+    'R' -> 2,
+    'S' -> 2,
+    'T' -> 1,
+    'V' -> 3,
+    'W' -> 2,
+    'Y' -> 2
+  )
   val ComplementTable = Map(
     'A' -> 'T',
     'B' -> 'V',
@@ -38,6 +55,14 @@ class Tools(val bindir: String) extends Serializable with Logging {
     'W' -> 'W',
     'Y' -> 'R'
   )
+  def getDegenerationMultiplier(in: String) : Int = {
+    info("motif: " + in)
+    var ret = 1
+    for (i <- in.size -1 to 0 by -1) {
+      ret *= DegenerationTable(in(i))
+    }
+    ret
+  }
 
   def reverseComplement(in: String) : String = {
     var ret = ""
@@ -130,52 +155,30 @@ class Tools(val bindir: String) extends Serializable with Logging {
     genesToKeep
   }
 
-  def joinFastaAndLocations(fasta: String, partitions: Int, sc: SparkContext, motifLocations: RDD[((String, Int), String)], maxMotifLen: Int): RDD[((String, Int), Double)] = {
+  def joinFastaAndLocations(fasta: String, partitions: Int, sc: SparkContext, motifLocations: RDD[((String, Int), (String, Float))], maxMotifLen: Int): RDD[((String, Int), (String, Float))] = {
     val geneMap =  getGeneMap(fasta, partitions, sc)
     info("genes count: " + geneMap.count);
 
-    val geneLocationsInFasta = geneMap.join(
-      motifLocations.map(x =>
-        (x._1._1,
-          (x._1._2, x._2.split(";").map(x => x.split(":")(1).toDouble).max )
-        )
-      )
-    )
-    // returns: [(string, ((string, int,  int), (int,         string)))]
-    //            motif     chr     start end    pos_in_gene  (motif:blsscore) -list
+    val geneLocationsInFasta = geneMap.join( motifLocations.map(x => (x._1._1, (x._1._2, x._2) ) ) )
+    // returns: [(string, ((string, int,  int), (int,         (string, float))))]
+    //            motif     chr     start end    pos_in_gene  (best motif, bls score)
+    //            _1      _2._1._1  _2._1._2&3  _2._2._1       2._2._2 (._1&2)
     // filter based on the gene list of that fasta file
 
 
     geneLocationsInFasta.map(x => {
       ((x._2._1._1,
         if(x._2._2._1 > 0) x._2._1._2 + x._2._2._1 else x._2._1._3 + x._2._2._1 - (maxMotifLen - 1) + 1), // TODO assumes only a single length of motifs are used!!
-          x._2._2._2
+        (if(x._2._2._1 > 0) x._2._2._2._1 else reverseComplement(x._2._2._2._1), x._2._2._2._2)
         )
-    }).reduceByKey((x, y) => {
-        if(x > y) x else y
-    })
-  }
-
-  def joinFastaAndLocationsWithMotifs(fasta: String, partitions: Int, sc: SparkContext, motifLocations: RDD[((String, Int), String)], maxMotifLen: Int): RDD[((String, Int), (String,Double))] = {
-    val geneMap =  getGeneMap(fasta, partitions, sc)
-    info("genes count: " + geneMap.count);
-
-    val geneLocationsInFasta = geneMap.join(motifLocations.map(x => (x._1._1, (x._1._2, x._2))))
-    // returns: [(string, ((string, int,  int), (int,         string)))]
-    //            motif     chr     start end    pos_in_gene  (motif:blsscore) -list
-    // filter based on the gene list of that fasta file
-
-
-    geneLocationsInFasta.map(x => {
-      ((x._2._1._1,
-        if(x._2._2._1 > 0) x._2._1._2 + x._2._2._1 else x._2._1._3 + x._2._2._1 - (maxMotifLen - 1) + 1), // TODO assumes only a single length of motifs are used!!
-            // get a list of motifs mapped to the location like this:
-            ( if(x._2._2._1 > 0) x._2._2._2.split(";").map(x => x.split(":")(0)).mkString(";") else x._2._2._2.split(";").map(x => reverseComplement(x.split(":")(0))).mkString(";"),
-          x._2._2._2.split(";").map(x => x.split(":")(1).toDouble).max
-        ))
-    }).reduceByKey((x, y) => {
-      (x._1  +  ";" + y._1,
-        if(x._2 > y._2) x._2 else y._2)
+    }).reduceByKey((x, y) => { // merge forward and reverse strand....
+       // keeps only highest scoring motif with lowest degenartion (when multiple motifs at max score)
+      if(x._2 > y._2)
+        x
+      else if (x._2 == y._2)
+        if (getDegenerationMultiplier(x._1) < getDegenerationMultiplier(y._1)) y else x
+      else
+        y
     })
   }
 
@@ -203,7 +206,7 @@ class Tools(val bindir: String) extends Serializable with Logging {
   }
 
   def locateMotifs(families: RDD[String], mode: String, motifs: Broadcast[Array[String]], alignmentBased: Boolean,
-    maxDegen: Int, maxMotifLen: Int, thresholdList: List[Float]) : RDD[((String, Int), String)] = {
+    maxDegen: Int, maxMotifLen: Int, thresholdList: List[Float]) : RDD[((String, Int), (String, Float))] = {
 
     val preppedFamiliesAndMotifs = families.map(x => x + motifs.value.mkString("\n") + "\n")
     val motifWithLocations = preppedFamiliesAndMotifs.pipe(getCommand(mode, alignmentBased, thresholdList, 0, maxDegen, 0, maxMotifLen))
@@ -211,11 +214,18 @@ class Tools(val bindir: String) extends Serializable with Logging {
       val split = x.split("\t")
       split(2).split(";").map(y => {
         val tmp = y.split("@")
-        ((tmp(0), tmp(1).toInt), split(0) + ":" + split(1))
+        ((tmp(0), tmp(1).toInt), (split(0), split(1).toFloat))
       })
+    }).reduceByKey((x, y) => {
+       // keeps only highest scoring motif with lowest degenartion (when multiple motifs at max score)
+      if(x._2 > y._2)
+        x
+      else if (x._2 == y._2)
+        if (getDegenerationMultiplier(x._1) < getDegenerationMultiplier(y._1)) y else x
+      else
+        y
     })
-
-    locations.reduceByKey(_ + ";" + _)
+    locations
   }
 
   def iterateMotifs(input: RDD[String], mode: String, alignmentBased: Boolean, alphabet: Int,
