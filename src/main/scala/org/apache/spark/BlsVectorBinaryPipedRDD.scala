@@ -14,17 +14,21 @@ import scala.collection.JavaConverters._
 import scala.io.Codec.string2codec
 import scala.io.{Codec, Source}
 import scala.reflect.ClassTag
+import collection.immutable.HashMap
+import be.ugent.intec.ddecap.dna.BlsVector
+import be.ugent.intec.ddecap.dna.BlsVectorFunctions._
 
 // based on PipedRDD from Spark!
-class BinaryPipedRDD[T: ClassTag](
+class BlsVectorBinaryPipedRDD[T: ClassTag](
     prev: RDD[T],
     command: Seq[String],
     procName: String,
     maxMotifLen: Int,
+    thresholdListSize: Int,
     var logLevel: Level = Level.INFO,
     envVars: Map[String, String] = scala.collection.immutable.Map(),
     separateWorkingDir: Boolean = false)
-  extends RDD[((Long, Long), Byte)](prev) with be.ugent.intec.ddecap.Logging {
+  extends RDD[((Long, Long), BlsVector)](prev) with be.ugent.intec.ddecap.Logging {
   type ImmutableDna = Long
   class NotEqualsFileNameFilter(filterName: String) extends FilenameFilter {
     def accept(dir: File, name: String): Boolean = {
@@ -35,7 +39,7 @@ class BinaryPipedRDD[T: ClassTag](
   val longBytes = 8
   override def getPartitions: Array[Partition] = firstParent[T].partitions
 
-  override def compute(split: Partition, context: TaskContext): Iterator[((ImmutableDna, ImmutableDna), Byte)] = {
+  override def compute(split: Partition, context: TaskContext): Iterator[((ImmutableDna, ImmutableDna), BlsVector)] = {
 
     if(logLevel != null && logLevel != Level.ERROR) {
         Logger.getLogger("be.ugent.intec.ddecap").setLevel(logLevel)
@@ -121,7 +125,7 @@ class BinaryPipedRDD[T: ClassTag](
 //        val out = new PrintWriter(new BufferedWriter(
 //          new OutputStreamWriter(proc.getOutputStream, Codec.defaultCharsetCodec.name), bufferSize))
         try {
-          for (it <- firstParent[Array[Byte]].iterator(split, context)) {
+          for (it <- firstParent[Array[Byte]].iterator(split, context)) { // this is a byte iterator about to be converted to another rdd!
             for (elem <- it) {
               // longBuffer.putLong(0, elem);
               // out.write(longBuffer.array())
@@ -131,10 +135,10 @@ class BinaryPipedRDD[T: ClassTag](
             }
           }
         } catch {
-          case t: Throwable => {info("exception!?!?!" + t.toString() ); childThreadException.set(t)}
+          case t: Throwable => {info("exception!?!?!" + t.toString()); childThreadException.set(t)}
         } finally {
-          out.close()
           info("["+ split.index+ "] has written " + fsize + " bytes to stdin")
+          out.close()
         }
       }
     }
@@ -155,6 +159,8 @@ class BinaryPipedRDD[T: ClassTag](
 
     // interrupts stdin writer and stderr reader threads when the corresponding task is finished.
     context.addTaskCompletionListener(listener)
+    // save all words in a HashMap
+    val retmap =  scala.collection.mutable.Map.empty[(ImmutableDna, ImmutableDna), BlsVector]
 
     // reads data in stream, without loading it all to memory!! -> way more memory efficient
     // example data format with size of 8:
@@ -170,7 +176,7 @@ class BinaryPipedRDD[T: ClassTag](
     var blsvec : Byte = 0;
     var bytesRead = channel.read(buf)
     buf.flip()
-    new Iterator[((ImmutableDna, ImmutableDna), Byte)] {
+    val it = new Iterator[((ImmutableDna, ImmutableDna), Byte)] {
       def next(): ((ImmutableDna, ImmutableDna), Byte) = {
         if (!hasNext()) {
           throw new NoSuchElementException()
@@ -230,6 +236,15 @@ class BinaryPipedRDD[T: ClassTag](
         }
       }
     }
+    while(it.hasNext()) {
+      val tmp = it.next();
+      retmap.get(tmp._1) match {
+        case Some(e) => retmap.update(tmp._1, e.addByte(blsvec, thresholdListSize))
+        case None    => retmap += (tmp._1 -> getBlsVectorFromByte(blsvec, thresholdListSize))
+      }
+    }
 
+    // return retmap iterator
+    retmap.iterator
   }
 }

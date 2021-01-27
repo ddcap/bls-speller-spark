@@ -16,7 +16,7 @@ import scala.io.{Codec, Source}
 import scala.reflect.ClassTag
 
 // based on PipedRDD from Spark!
-class BinaryPipedRDD[T: ClassTag](
+class IteratedBinaryPipedRDD[T: ClassTag](
     prev: RDD[T],
     command: Seq[String],
     procName: String,
@@ -24,7 +24,7 @@ class BinaryPipedRDD[T: ClassTag](
     var logLevel: Level = Level.INFO,
     envVars: Map[String, String] = scala.collection.immutable.Map(),
     separateWorkingDir: Boolean = false)
-  extends RDD[((Long, Long), Byte)](prev) with be.ugent.intec.ddecap.Logging {
+  extends RDD[Iterator[((Long, Long), Byte)]](prev) with be.ugent.intec.ddecap.Logging {
   type ImmutableDna = Long
   class NotEqualsFileNameFilter(filterName: String) extends FilenameFilter {
     def accept(dir: File, name: String): Boolean = {
@@ -35,7 +35,7 @@ class BinaryPipedRDD[T: ClassTag](
   val longBytes = 8
   override def getPartitions: Array[Partition] = firstParent[T].partitions
 
-  override def compute(split: Partition, context: TaskContext): Iterator[((ImmutableDna, ImmutableDna), Byte)] = {
+  override def compute(split: Partition, context: TaskContext): Iterator[Iterator[((ImmutableDna, ImmutableDna), Byte)]] = {
 
     if(logLevel != null && logLevel != Level.ERROR) {
         Logger.getLogger("be.ugent.intec.ddecap").setLevel(logLevel)
@@ -170,7 +170,7 @@ class BinaryPipedRDD[T: ClassTag](
     var blsvec : Byte = 0;
     var bytesRead = channel.read(buf)
     buf.flip()
-    new Iterator[((ImmutableDna, ImmutableDna), Byte)] {
+    List(new Iterator[((ImmutableDna, ImmutableDna), Byte)] {
       def next(): ((ImmutableDna, ImmutableDna), Byte) = {
         if (!hasNext()) {
           throw new NoSuchElementException()
@@ -229,7 +229,7 @@ class BinaryPipedRDD[T: ClassTag](
           throw t
         }
       }
-    }
+    }).iterator
 
   }
 }

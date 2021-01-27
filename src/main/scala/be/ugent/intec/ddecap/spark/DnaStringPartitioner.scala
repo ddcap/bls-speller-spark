@@ -33,6 +33,7 @@ class DnaStringPartitioner(val maxNumPart: Int) extends Partitioner with Logging
       //   Math.abs(hashCode % maxNumPart)
       // }
       case (l: Long) => Math.abs(l.hashCode % maxNumPart)
+      case (motif: Long, grp: Long) => Math.abs(grp.hashCode % maxNumPart)
       case _ => {error("failed key is: " + key); throw new ClassCastException("failed key is: " + key)}
     }
   }

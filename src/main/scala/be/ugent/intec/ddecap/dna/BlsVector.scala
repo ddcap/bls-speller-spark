@@ -17,8 +17,8 @@ class BlsVector(var list : Array[Int]) extends Serializable with Logging {
   }
   def addByte(data: Byte, len: Int) = {
     assert(len == list.length)
-    for (i <- 0 until len) {
-      list(i) += (if (i<data) 1 else 0); //  (0x1 & (data >> i));
+    for (i <- 0 to len - 1) {
+      list(i) += (if (i<data) 1 else 0);
     }
     this
   }
@@ -48,11 +48,14 @@ class BlsVector(var list : Array[Int]) extends Serializable with Logging {
 
 object BlsVectorFunctions {
   def getBlsVectorFromByte(data: Byte, len: Int) : BlsVector = {
-    var list = Array.fill(len)(0)
+    var list : Array[Int] = Array.fill(len)(0)
     for (i <- 0 to len - 1) {
       list(i) = (if (i<data) 1 else 0); //  (0x1 & (data >> i));
       // list(i) = (0x1 & (data >> i));
     }
     return new BlsVector(list)
+  }
+  def getEmptyBlsVector(len: Int) : BlsVector = {
+    return new BlsVector(Array.fill(len)(0))
   }
 }

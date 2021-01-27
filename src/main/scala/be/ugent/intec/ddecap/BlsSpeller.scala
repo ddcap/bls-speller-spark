@@ -12,6 +12,8 @@ import org.apache.log4j.{Level, Logger}
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.storage.StorageLevel
 import org.apache.spark.{SparkConf, SparkContext}
+import org.apache.spark.rdd.RDD
+import be.ugent.intec.ddecap.dna.BlsVector
 
 object BlsSpeller extends Logging {
   object LoggingMode extends Enumeration {
@@ -34,6 +36,8 @@ object BlsSpeller extends Logging {
       alphabet: Int = 2, // 0: exact, 1: exact+N, 2: exact+2fold+M, 3: All
       familyCountCutOff: Int = 1,
       onlyiterate: Boolean = false,
+      mapSideCombine: Boolean = false,
+      useSecondIterator: Boolean = false,
       similarityScore: Int = -1,
       backgroundModelCount: Int = 1000,
       confidenceScoreCutOff: Double = 0.5,
@@ -56,7 +60,8 @@ object BlsSpeller extends Logging {
               .set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
               .set("spark.kryo.registrator","be.ugent.intec.ddecap.spark.BlsKryoSerializer")
               .set("spark.kryoserializer.buffer.mb","128")
-              .set("spark.kryo.registrationRequired", "true");
+              .set("spark.kryo.registrationRequired", "true")
+              .set("spark.executor.processTreeMetrics.enabled", "true");
         val spark = SparkSession.builder
                                 .appName("BLS Speller")
                                 .config(conf)
@@ -137,14 +142,14 @@ object BlsSpeller extends Logging {
       opt[Unit]("AB").action( (_, c) =>
         c.copy(alignmentBased = true) ).text("Alignment based motif discovery.")
 
-      opt[Unit]("onlyiterate").action( (_, c) =>
-        c.copy(onlyiterate = true) ).text("Only iterate motifs, without processing.")
+      // opt[Unit]("onlyiterate").action( (_, c) =>
+        // c.copy(onlyiterate = true) ).text("Only iterate motifs, without processing.")
 
       opt[String]("bls_thresholds").action( (x, c) =>
       {
         val list = x.split(",").map(x => x.toFloat).toList
         c.copy(thresholdList = list)
-      }).text("List of BLS threshold sepparated by a comma. Default is 0.15, 0.5, 0.6, 0.7, 0.9, 0.95. Currently a maximum of 8 thresholds is supported!")
+      }).text("List of BLS threshold sepparated by a comma (example: 0.15,0.5,0.6,0.7,0.9,0.95).").required()
 
       // command to find motifs in ortho groups
         cmd("getMotifs").action( (_, c) => c.copy(mode = "getMotifs") ).
@@ -152,6 +157,10 @@ object BlsSpeller extends Logging {
           children(
             opt[Int]("alphabet").action( (x, c) =>
               c.copy(alphabet = x) ).text("Sets the alphabet used in motif iterator: 0: Exact, 1: Exact+N, 2: Exact+2fold+M, 3: All. Default is 2."),
+            opt[Unit]("mapside_combine").action( (_, c) =>
+              c.copy(mapSideCombine = true) ).text("Disables the map side combine."),
+            opt[Unit]("old_iterator").action( (_, c) =>
+              c.copy(useSecondIterator = true) ).text("Use old way of iterating/merging. Uses a combinByKey with a Hashmap to collect motifs rather than using the Spark framework for this."),
             opt[Int]("min_len").action( (x, c) =>
               c.copy(minMotifLen = x) ).text("Sets the minimum length of a motif.").required(),
             opt[Int]("bg_model_count").action( (x, c) =>
@@ -180,24 +189,37 @@ object BlsSpeller extends Logging {
     Timer.startTime()
     var tools = new Tools(config.bindir);
     var families = tools.readOrthologousFamilies(config.input, config.partitions, sc);
-    info("family count: " + families.count);
+    val familiescount : Long = families.count
+    info("family count: " + familiescount );
 
     if(config.mode == "getMotifs") {
-      val motifs = tools.iterateMotifs(families, config.mode, config.alignmentBased, config.alphabet, config.maxDegen, config.minMotifLen, config.maxMotifLen, config.thresholdList);
-      val groupedMotifs = groupMotifsByGroup(motifs, config.thresholdList, config.partitions);
-      val output = processGroups(groupedMotifs, config.thresholdList, config.backgroundModelCount, config.similarityScore, config.familyCountCutOff, config.confidenceScoreCutOff)
+      var output = if(config.useSecondIterator)
+        {
+          val motifs = tools.iterateMotifsOld(families, config.mode, config.alignmentBased, config.alphabet, config.maxDegen, config.minMotifLen, config.maxMotifLen, config.thresholdList);
+          val groupedMotifs = groupMotifsByGroup(motifs, config.thresholdList, config.partitions);
+          oldProcessGroups(groupedMotifs, config.thresholdList, config.backgroundModelCount, config.similarityScore, config.familyCountCutOff, config.confidenceScoreCutOff)
+        } else {
+          val groupedMotifs = if(config.mapSideCombine)
+            {
+              val motifs = tools.iterateMotifsAndMerge(families, config.mode, config.alignmentBased, config.alphabet, config.maxDegen, config.minMotifLen, config.maxMotifLen, config.thresholdList);
+              val motifsWithBlsCounts = countBlsMergedMotifs(motifs, config.partitions);
+              groupMotifsWithBlsCount(motifsWithBlsCounts, config.partitions);
+            } else {
+              val motifs = tools.iterateMotifs(families, config.mode, config.alignmentBased, config.alphabet, config.maxDegen, config.minMotifLen, config.maxMotifLen, config.thresholdList);
+              val motifsWithBlsCounts = countBls(motifs, config.thresholdList, config.partitions);
+              groupMotifsWithBlsCount(motifsWithBlsCounts, config.partitions);
+            }
+          processGroups(groupedMotifs, config.thresholdList, config.backgroundModelCount, config.similarityScore, config.familyCountCutOff, config.confidenceScoreCutOff)
+        }
 
-      // motifs.persist(config.persistLevel)
-      // info("motifs count: " + motifs.count);
-      // groupedMotifs.persist(config.persistLevel)
-      // info("groupedMotifs count: " + groupedMotifs.count);
 
       deleteRecursively(config.output)
-      if(config.onlyiterate)
-        motifs.map(x => LongToDnaString(x._1) + "\t" + LongToDnaString(x._2._1, config.maxMotifLen - 1) + "\t" + toBinary(x._2._2)).saveAsTextFile(config.output);
+      // if(config.onlyiterate)
+        // motifsWithBlsCounts.map(x => LongToDnaString(x._1) + "\t" + LongToDnaString(x._2._1, config.maxMotifLen - 1) + "\t" + x._2._2).saveAsTextFile(config.output);
         // motifs.map(x => (x._1.map(b => toBinary(b, 8)).mkString(" ") + "\t" + x._2._1.map(b => toBinary(b, 8)).mkString(" ") + "\t" + toBinary(x._2._2, 8))).saveAsTextFile(config.output);
-      else
-        output.map(x => (LongToDnaString(x._1, getDnaLength(x._4)) + "\t" + x._2 + "\t" + x._3.mkString("\t") + "\t")).saveAsTextFile(config.output);
+      // else
+      output.map(x => (LongToDnaString(x._1, getDnaLength(x._4)) + "\t" + x._2 + "\t" + x._3.mkString("\t") + "\t")).saveAsTextFile(config.output);
+
 
   // for testing can write other rdd's to output:
       // deleteRecursively(config.output + "-motifs");
@@ -218,7 +240,7 @@ object BlsSpeller extends Logging {
       } else {
         // read the fasta file and get position in genome -> RDD[(gene_id, start_pos, end_pos)]
         val genomeLocations = tools.joinFastaAndLocations(config.fasta, config.partitions, sc, motifLocations, config.maxMotifLen)
-        genomeLocations.sortBy(x=> x._1).map(x => x._1._1 + '\t' + x._1._2 + '\t' + (x._1._2 + config.maxMotifLen - 1)  + '\t' + x._2._2 + '\t' + x._2._1).saveAsTextFile(config.output);
+        genomeLocations.sortBy(x=> x._1).map(x => x._1._1 + '\t' + x._1._2 + '\t' + (x._1._2 + config.maxMotifLen - 1)  + '\t' + x._2._1 + '\t' + x._2._2).saveAsTextFile(config.output);
       }
       info(Timer.measureTotalTime("BlsSpeller - locate Motifs"))
     } else {

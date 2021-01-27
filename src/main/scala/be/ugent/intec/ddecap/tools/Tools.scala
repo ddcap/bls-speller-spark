@@ -15,6 +15,8 @@ import org.apache.log4j.Level
 import org.apache.log4j.Logger
 import org.apache.spark.BinaryPipedRDD
 import java.nio.ByteBuffer
+import be.ugent.intec.ddecap.dna.BlsVector
+import be.ugent.intec.ddecap.dna.BlsVectorFunctions._
 
 @SerialVersionUID(227L)
 class Tools(val bindir: String) extends Serializable with Logging {
@@ -109,8 +111,11 @@ class Tools(val bindir: String) extends Serializable with Logging {
     })
   }
 
-  private def toBinaryPairFormat(rdd: RDD[String]) : RDD[(ImmutableDna, (ImmutableDna, Byte))] = {
-    rdd.map(x => (x.getBytes.toVector, (Vector(), 0x0)))
+  private def toBinaryPairFormat(rdd: RDD[String]) : RDD[((ImmutableDna, ImmutableDna), Byte)] = {
+    rdd.map(x => ( (x.getBytes.toVector,Vector()), 0x0))
+  }
+  private def toBlsVectorPairFormat(rdd: RDD[String], len: Int) : RDD[((ImmutableDna, ImmutableDna), BlsVector)] = {
+    rdd.map(x => ((x.getBytes.toVector, Vector()), getEmptyBlsVector(len)))
   }
   private def toBinaryFormat(rdd: RDD[String]) : RDD[Array[Byte]] = {
     rdd.map(x => x.getBytes)
@@ -228,28 +233,45 @@ class Tools(val bindir: String) extends Serializable with Logging {
     locations
   }
 
-  def iterateMotifs(input: RDD[String], mode: String, alignmentBased: Boolean, alphabet: Int,
+
+  // info about data input:
+        // iterateMotifs (c++ binary) outputs binary data, per motif this content is given:
+        // 1 byte: length of motif
+        // x bytes: motif content group in binary format, length depends on first byte (length) where there's 2 characters per byte
+        // x bytes: motif itself in binary format
+        // 1 byte: bls vector, first bit is 1 if the bls sscore of this motif in this family is higher then the first threshold, and so on for up to 8 thresholds
+        // binary format:
+          // 2 charactes per byte:
+          //    4 bits per character:   T G C A
+          //                            x x x x -> 1 if that letter is in the iupac letter, 0 if not
+          //                      ie A: 0 0 0 1
+          //                      ie G: 0 1 0 0
+          //                      ie M: 0 0 1 1 // A or C
+
+      // this is formatted in a key value pair as follows:
+      // key: array[byte] -> first byte of length + motif content group
+      // value: (array[byte], byte) -> the content of the motif itself (without the length! as this is already in the key) + the bls byte
+
+  def iterateMotifsOld(input: RDD[String], mode: String, alignmentBased: Boolean, alphabet: Int,
     maxDegen: Int, minMotifLen: Int, maxMotifLen: Int,
     thresholdList: List[Float]) : RDD[(Long, (Long, Byte))] = {
 
-      // iterateMotifs (c++ binary) outputs binary data, per motif this content is given:
-      // 1 byte: length of motif
-      // x bytes: motif content group in binary format, length depends on first byte (length) where there's 2 characters per byte
-      // x bytes: motif itself in binary format
-      // 1 byte: bls vector, first bit is 1 if the bls sscore of this motif in this family is higher then the first threshold, and so on for up to 8 thresholds
-      // binary format:
-        // 2 charactes per byte:
-        //    4 bits per character:   T G C A
-        //                            x x x x -> 1 if that letter is in the iupac letter, 0 if not
-        //                      ie A: 0 0 0 1
-        //                      ie G: 0 1 0 0
-        //                      ie M: 0 0 1 1 // A or C
-
-    // this is formatted in a key value pair as follows:
-    // key: array[byte] -> first byte of length + motif content group
-    // value: (array[byte], byte) -> the content of the motif itself (without the length! as this is already in the key) + the bls byte
-    (new org.apache.spark.BinaryPipedRDD(toLongPairFormat(input), getCommand(mode, alignmentBased, thresholdList, alphabet,
+    (new org.apache.spark.OldBinaryPipedRDD(toBinaryFormat(input), getCommand(mode, alignmentBased, thresholdList, alphabet,
       maxDegen, minMotifLen, maxMotifLen), "motifIterator", maxMotifLen)).flatMap(identity)
   }
 
+  def iterateMotifs(input: RDD[String], mode: String, alignmentBased: Boolean, alphabet: Int,
+    maxDegen: Int, minMotifLen: Int, maxMotifLen: Int,
+    thresholdList: List[Float]) : RDD[((Long, Long), Byte)] = {
+
+    (new org.apache.spark.IteratedBinaryPipedRDD(toBinaryFormat(input), getCommand(mode, alignmentBased, thresholdList, alphabet,
+      maxDegen, minMotifLen, maxMotifLen), "motifIterator", maxMotifLen)).flatMap(identity)
+  }
+
+  def iterateMotifsAndMerge(input: RDD[String], mode: String, alignmentBased: Boolean, alphabet: Int,
+    maxDegen: Int, minMotifLen: Int, maxMotifLen: Int,
+    thresholdList: List[Float]) : RDD[((Long, Long), BlsVector)] = {
+    (new org.apache.spark.BlsVectorBinaryPipedRDD(toBinaryFormat(input), getCommand(mode, alignmentBased, thresholdList, alphabet,
+      maxDegen, minMotifLen, maxMotifLen), "motifIterator", maxMotifLen, thresholdList.length)) //.flatMap(identity)
+  }
 }

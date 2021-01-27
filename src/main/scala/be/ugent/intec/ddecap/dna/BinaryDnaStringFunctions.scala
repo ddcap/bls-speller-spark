@@ -118,13 +118,35 @@ object BinaryDnaStringFunctions {
   def findMedian(arr: List[Int]) = findKMedian(arr, (arr.size - 1) / 2)
 
 
-  def getMedianPerThreshold(data: HashMap[ImmutableDna, BlsVector], bgmodel: ListBuffer[ImmutableDna], thresholdListSize: Int) : BlsVector = {
+  def getMedianPerThreshold(data: List[(ImmutableDna, BlsVector)], bgmodel: ListBuffer[ImmutableDna], thresholdListSize: Int) : BlsVector = {
     // uses the existing motifs with corresponding bls vectors to determine the backgrounmodel, other motifs have a bls vector with all 0s
     val arr = Array.fill(thresholdListSize)(0)
     val nulvector = new BlsVector(Array.fill(thresholdListSize)(0))
     val bgmodelMap = bgmodel.groupBy(identity).map(x => (x._1, x._2.size))
     val bgmodelVectors = ListBuffer[BlsVector]()
-    for(d <- data) { // for each motif calculate every F(Ti) and corresponding C(Ti)
+    for(d <- data) { // loop over smallest one? -> data (contains found motifs) or bgmodelmap (will contain random motifs not in data)
+      if(bgmodelMap.contains(d._1)) {
+        for(i <- 0 until bgmodelMap(d._1)) {
+          bgmodelVectors += d._2
+        }
+      }
+    }
+    // logger.info("bgmodelVectors.size: " + bgmodelVectors.size);
+    for (i <- bgmodelVectors.size until bgmodel.size) {
+      bgmodelVectors += nulvector
+    }
+    for (i <- 0 until thresholdListSize) {
+      arr(i) = findMedian(bgmodelVectors.map(x => x.getThresholdCount(i)).toList)
+    }
+    new BlsVector(arr)
+  }
+  def oldGetMedianPerThreshold(data: HashMap[ImmutableDna, BlsVector], bgmodel: ListBuffer[ImmutableDna], thresholdListSize: Int) : BlsVector = {
+    // uses the existing motifs with corresponding bls vectors to determine the backgrounmodel, other motifs have a bls vector with all 0s
+    val arr = Array.fill(thresholdListSize)(0)
+    val nulvector = new BlsVector(Array.fill(thresholdListSize)(0))
+    val bgmodelMap = bgmodel.groupBy(identity).map(x => (x._1, x._2.size))
+    val bgmodelVectors = ListBuffer[BlsVector]()
+    for(d <- data) { // loop over smallest one? -> data (contains found motifs) or bgmodelmap (will contain random motifs not in data)
       if(bgmodelMap.contains(d._1)) {
         for(i <- 0 until bgmodelMap(d._1)) {
           bgmodelVectors += d._2

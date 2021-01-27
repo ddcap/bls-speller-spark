@@ -1,6 +1,6 @@
 name := "bls-speller"
 
-version := "0.1"
+version := "0.2"
 scalaVersion := "2.12.12"
 val sparkVersion = "3.0.0"
 
