@@ -14,14 +14,12 @@ import scala.collection.JavaConverters._
 import scala.io.Codec.string2codec
 import scala.io.{Codec, Source}
 import scala.reflect.ClassTag
-import collection.immutable.HashMap
 import be.ugent.intec.ddecap.dna.BlsVector
 import be.ugent.intec.ddecap.dna.BlsVectorFunctions._
-import be.ugent.intec.ddecap.dna.ImmutableDnaPair
-import org.apache.spark.util.collection.ImmutableDnaToBlsVectorOpenHashMap
+import be.ugent.intec.ddecap.dna.{ImmutableDnaPair, ImmutableDnaWithBlsVector}
 
 // based on PipedRDD from Spark!
-class BlsVectorBinaryPipedRDD[T: ClassTag](
+class CountedPairBinaryPipedRDD[T: ClassTag](
     prev: RDD[T],
     command: Seq[String],
     procName: String,
@@ -30,10 +28,8 @@ class BlsVectorBinaryPipedRDD[T: ClassTag](
     var logLevel: Level = Level.INFO,
     envVars: Map[String, String] = scala.collection.immutable.Map(),
     separateWorkingDir: Boolean = false)
-  // extends RDD[(ImmutableDnaPair, Array[Int])](prev) with be.ugent.intec.ddecap.Logging {
   extends RDD[(ImmutableDnaPair, BlsVector)](prev) with be.ugent.intec.ddecap.Logging {
-  type ImmutableDna = Long
-  // type BlsVector = Array[Int]
+
   class NotEqualsFileNameFilter(filterName: String) extends FilenameFilter {
     def accept(dir: File, name: String): Boolean = {
       !name.equals(filterName)
@@ -42,12 +38,11 @@ class BlsVectorBinaryPipedRDD[T: ClassTag](
 
   val longBytes = 8
   override def getPartitions: Array[Partition] = firstParent[T].partitions
-
   override def compute(split: Partition, context: TaskContext): Iterator[(ImmutableDnaPair, BlsVector)] = {
 
     if(logLevel != null && logLevel != Level.ERROR) {
         Logger.getLogger("be.ugent.intec.ddecap").setLevel(logLevel)
-        Logger.getLogger("org.apache.spark.BlsVectorBinaryPipedRDD").setLevel(logLevel)
+        Logger.getLogger("org.apache.spark.CountedBinaryPipedRDD").setLevel(logLevel)
     }
     val time = System.nanoTime
     val pb = new ProcessBuilder(command.asJava)
@@ -133,10 +128,10 @@ class BlsVectorBinaryPipedRDD[T: ClassTag](
             fsize+=it.length
           }
         } catch {
-          case t: Throwable => {info("exception!?!?!" + t.toString()); childThreadException.set(t)}
+          case t: Throwable => {info("exception!?!?!" + t.toString() ); childThreadException.set(t)}
         } finally {
-          info("["+ split.index+ "] has written " + fsize + " bytes to stdin")
           out.close()
+          info("["+ split.index+ "] has written " + fsize + " bytes to stdin")
         }
       }
     }
@@ -157,37 +152,39 @@ class BlsVectorBinaryPipedRDD[T: ClassTag](
 
     // interrupts stdin writer and stderr reader threads when the corresponding task is finished.
     context.addTaskCompletionListener(listener)
-    // save all words in a HashMap
-    // val retmap =  scala.collection.mutable.Map.empty[(ImmutableDna, ImmutableDna), BlsVector]
-    val initialCapacity = 1048576
-    val retmap = new ImmutableDnaToBlsVectorOpenHashMap(initialCapacity)
 
     // reads data in stream, without loading it all to memory!! -> way more memory efficient
     // example data format with size of 8:
     //    group    motif <-- (4 bytes since 2 chars per byte and theres 8 chars)
     // 8 - - - -  - - - -  bls
     val wordSize = (maxMotifLen >> 1)
-    val totalMotifSize = 2 * wordSize + 2
+    val blscounttypesize = 1;
+    val totalMotifSize = 2 * wordSize + 2 + blscounttypesize * thresholdListSize // short numbers
     val grp: Array[Byte] = Array.fill(longBytes)(0x0);
     val wrd: Array[Byte] = Array.fill(longBytes)(0x0);
     val channel = Channels.newChannel(proc.getInputStream)
     val bufsize = totalMotifSize * 2048 // should be about best performance at this number
     val buf = ByteBuffer.allocate(bufsize);
     var blsvec : Byte = 0;
+    var blsvecdata: Array[Byte] = Array.fill(2 * thresholdListSize)(0x0);
     var bytesRead = channel.read(buf)
     buf.flip()
-    val it = new Iterator[(ImmutableDnaPair, Byte)] {
-      def next(): (ImmutableDnaPair, Byte) = {
+    new Iterator[(ImmutableDnaPair, BlsVector)] {
+      var counted = 0;
+      def next(): (ImmutableDnaPair, BlsVector) = {
         if (!hasNext()) {
           throw new NoSuchElementException()
         }
+        counted+=1;
+    //    if(counted % 1000000 == 0 ) {
+    //      info("counted " + counted + " from stdout");
+    //    }
         buf.get(grp, 0, wordSize + 1)            // length + grp
         buf.get(wrd, 0, wordSize + 1)            // wrd + blsvec
-        blsvec = wrd(wordSize) // last byte of wrd bytes
+        blsvec = wrd(wordSize) // this is the amount of bytes that should be read next.
         wrd(wordSize) = 0 // needs to be set 0 so we can group by long instead of having the bls vector differentiating the same motif
-        // (grp.toVector, (wrd.toVector, buf.get))    // --> (array[byte] , (array[byte], byte ))
-        // (ByteBuffer.wrap(grp).getLong(), (ByteBuffer.wrap(wrd).getLong(), blsvec))
-        (ImmutableDnaPair(ByteBuffer.wrap(wrd).getLong(), ByteBuffer.wrap(grp).getLong()), blsvec)
+        buf.get(blsvecdata, 0, blscounttypesize * thresholdListSize)
+        (ImmutableDnaPair(ByteBuffer.wrap(wrd).getLong(), ByteBuffer.wrap(grp).getLong()),  getBlsVectorFromCharList(blsvecdata, blsvec))
       }
       def hasNext(): Boolean = {
         val result = if (buf.position() + totalMotifSize <= buf.limit())
@@ -236,12 +233,7 @@ class BlsVectorBinaryPipedRDD[T: ClassTag](
         }
       }
     }
-    while(it.hasNext()) {
-      val tmp = it.next();
-      retmap.updateBlsVector(tmp._1, blsvec, thresholdListSize);
-    }
+    // }).iterator
 
-    // return retmap iterator
-    retmap.iterator
   }
 }

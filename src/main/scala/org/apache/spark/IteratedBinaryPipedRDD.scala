@@ -14,6 +14,7 @@ import scala.collection.JavaConverters._
 import scala.io.Codec.string2codec
 import scala.io.{Codec, Source}
 import scala.reflect.ClassTag
+import be.ugent.intec.ddecap.dna.ImmutableDnaPair
 
 // based on PipedRDD from Spark!
 class IteratedBinaryPipedRDD[T: ClassTag](
@@ -24,8 +25,7 @@ class IteratedBinaryPipedRDD[T: ClassTag](
     var logLevel: Level = Level.INFO,
     envVars: Map[String, String] = scala.collection.immutable.Map(),
     separateWorkingDir: Boolean = false)
-  extends RDD[Iterator[((Long, Long), Byte)]](prev) with be.ugent.intec.ddecap.Logging {
-  type ImmutableDna = Long
+  extends RDD[Iterator[(ImmutableDnaPair, Byte)]](prev) with be.ugent.intec.ddecap.Logging {
   class NotEqualsFileNameFilter(filterName: String) extends FilenameFilter {
     def accept(dir: File, name: String): Boolean = {
       !name.equals(filterName)
@@ -35,13 +35,12 @@ class IteratedBinaryPipedRDD[T: ClassTag](
   val longBytes = 8
   override def getPartitions: Array[Partition] = firstParent[T].partitions
 
-  override def compute(split: Partition, context: TaskContext): Iterator[Iterator[((ImmutableDna, ImmutableDna), Byte)]] = {
+  override def compute(split: Partition, context: TaskContext): Iterator[Iterator[(ImmutableDnaPair, Byte)]] = {
 
     if(logLevel != null && logLevel != Level.ERROR) {
         Logger.getLogger("be.ugent.intec.ddecap").setLevel(logLevel)
-        Logger.getLogger("org.apache.spark.BinaryPipedRDD").setLevel(logLevel)
+        Logger.getLogger("org.apache.spark.IteratedBinaryPipedRDD").setLevel(logLevel)
     }
-    logLevel = Logger.getLogger(getClass()).getLevel()
     val time = System.nanoTime
     val pb = new ProcessBuilder(command.asJava)
     val cmd = command.mkString(" ")
@@ -121,14 +120,9 @@ class IteratedBinaryPipedRDD[T: ClassTag](
 //        val out = new PrintWriter(new BufferedWriter(
 //          new OutputStreamWriter(proc.getOutputStream, Codec.defaultCharsetCodec.name), bufferSize))
         try {
-          for (it <- firstParent[Array[Byte]].iterator(split, context)) {
-            for (elem <- it) {
-              // longBuffer.putLong(0, elem);
-              // out.write(longBuffer.array())
-              // fsize += longBytes
-              out.write(elem)
-              fsize+=1
-            }
+          for (it <- firstParent[String].iterator(split, context)) {
+            out.writeBytes(it)
+            fsize+=it.length
           }
         } catch {
           case t: Throwable => {info("exception!?!?!" + t.toString() ); childThreadException.set(t)}
@@ -170,8 +164,8 @@ class IteratedBinaryPipedRDD[T: ClassTag](
     var blsvec : Byte = 0;
     var bytesRead = channel.read(buf)
     buf.flip()
-    List(new Iterator[((ImmutableDna, ImmutableDna), Byte)] {
-      def next(): ((ImmutableDna, ImmutableDna), Byte) = {
+    List(new Iterator[(ImmutableDnaPair, Byte)] {
+      def next(): (ImmutableDnaPair, Byte) = {
         if (!hasNext()) {
           throw new NoSuchElementException()
         }
@@ -181,7 +175,7 @@ class IteratedBinaryPipedRDD[T: ClassTag](
         wrd(wordSize) = 0 // needs to be set 0 so we can group by long instead of having the bls vector differentiating the same motif
         // (grp.toVector, (wrd.toVector, buf.get))    // --> (array[byte] , (array[byte], byte ))
         // (ByteBuffer.wrap(grp).getLong(), (ByteBuffer.wrap(wrd).getLong(), blsvec))
-        ((ByteBuffer.wrap(wrd).getLong(), ByteBuffer.wrap(grp).getLong()), blsvec)
+        (ImmutableDnaPair(ByteBuffer.wrap(wrd).getLong(), ByteBuffer.wrap(grp).getLong()), blsvec)
       }
       def hasNext(): Boolean = {
         val result = if (buf.position() + totalMotifSize <= buf.limit())

@@ -7,11 +7,13 @@ import scala.collection.immutable.HashMap
 import scala.collection.mutable.ListBuffer
 import be.ugent.intec.ddecap.dna.LongEncodedDna._
 
+
 object BinaryDnaStringFunctions {
 
   private final val byteToAscii = Array(' ', 'A', 'C', 'M', 'G', 'R', 'S', 'V', 'T', 'W', 'Y', 'H', 'K', 'D', 'B', 'N')
   val logger = Logger.getLogger("be.ugent.intec.ddecap.dna.BinaryDnaStringFunctions");
   type ImmutableDna = Long
+  // type BlsVector = Array[Int];
   private val similarityCountfactor = 5;
 
   def generateBackgroundModel(key: ImmutableDna, backgroundModelCount: Int, similarityScore: Int): ListBuffer[ImmutableDna] = {
@@ -31,7 +33,7 @@ object BinaryDnaStringFunctions {
     }
   }
 
-  private def generateDissimilarBackgroundModel(key: ImmutableDna, backgroundModelCount: Int, similarityScore: (Long, Long, Int) => Long) : ListBuffer[ImmutableDna] = {
+  private def generateDissimilarBackgroundModel(key: ImmutableDna, backgroundModelCount: Int, similarityScore: SimilarityScoreType => Long) : ListBuffer[ImmutableDna] = {
     val bgmodel = generateBackgroundModel(key, similarityCountfactor*backgroundModelCount)
     val orderedbgmodel = orderByDissimilarityScore(bgmodel, getDnaLength(key), similarityScore)
     orderedbgmodel.take(backgroundModelCount)
@@ -67,23 +69,23 @@ object BinaryDnaStringFunctions {
     i = i + (i >>> 32);
     return i & 0x7f;
   }
-  def binaryHammingSimilarityScore(motifa: Long, motifb: Long, len: Int) : Long = {
-    var ret = bitCount((motifa^motifb) >> ((16-len)<<2)) // shift to right in order to eliminate problems with leftover 1s in that part
+  def binaryHammingSimilarityScore(motifdata: SimilarityScoreType) : Long = {
+    var ret = bitCount((motifdata.motifa^motifdata.motifb) >> ((16-motifdata.len)<<2)) // shift to right in order to eliminate problems with leftover 1s in that part
     ret.toInt
   }
-  def levenshteinSimilarityScore(motifa: Long, motifb: Long, len: Int) : Long = {
-    var a = (0 until len).toList
-    var b = (0 until len).toList
+  def levenshteinSimilarityScore(motifdata: SimilarityScoreType) : Long = {
+    var a = (0 until motifdata.len).toList
+    var b = (0 until motifdata.len).toList
 
     ((0 to b.size).toList /: a)((prev, x) =>
      (prev zip prev.tail zip b).scanLeft(prev.head + 1) {
-         case (h, ((d, v), y)) => math.min(math.min(h + 1, v + 1), d + (if (((motifa >> (60 -4*x)) & 0xf) == ((motifb >> (60 -4*y)) & 0xf)) 0 else 1))
+         case (h, ((d, v), y)) => math.min(math.min(h + 1, v + 1), d + (if (((motifdata.motifa >> (60 -4*x)) & 0xf) == ((motifdata.motifb >> (60 -4*y)) & 0xf)) 0 else 1))
        }).last
   }
-  def hammingSimilarityScore(motifa: Long, motifb: Long, len: Int) : Long = {
+  def hammingSimilarityScore(motifdata: SimilarityScoreType) : Long = {
     var count = 0L
-    var xor = (motifa ^ motifb) >> ((16-len)<<2);
-    for (i <- 0 until len) {
+    var xor = (motifdata.motifa ^ motifdata.motifb) >> ((16-motifdata.len)<<2);
+    for (i <- 0 until motifdata.len) {
       if ( (xor & 0xf) > 0) {
         count += 1
       }
@@ -92,9 +94,9 @@ object BinaryDnaStringFunctions {
     count
   }
 
-  def orderByDissimilarityScore(bgmodel: ListBuffer[ImmutableDna], motiflen: Int, similarityScore: (Long, Long, Int) => Long) : ListBuffer[ImmutableDna] = {
+  def orderByDissimilarityScore(bgmodel: ListBuffer[ImmutableDna], motiflen: Int, similarityScore: SimilarityScoreType => Long) : ListBuffer[ImmutableDna] = {
     val tmp = bgmodel.map(x => {
-      val s : Double = bgmodel.map(y => similarityScore(x,y, motiflen)).sum
+      val s : Double = bgmodel.map(y => similarityScore(SimilarityScoreType(x,y, motiflen))).sum
       (x, s/bgmodel.size)
     })
     tmp.sortBy(-_._2).map(_._1)
@@ -118,16 +120,17 @@ object BinaryDnaStringFunctions {
   def findMedian(arr: List[Int]) = findKMedian(arr, (arr.size - 1) / 2)
 
 
-  def getMedianPerThreshold(data: List[(ImmutableDna, BlsVector)], bgmodel: ListBuffer[ImmutableDna], thresholdListSize: Int) : BlsVector = {
+  def getMedianPerThreshold(data: List[ImmutableDnaWithBlsVector], bgmodel: ListBuffer[ImmutableDna], thresholdListSize: Int) : BlsVector = {
     // uses the existing motifs with corresponding bls vectors to determine the backgrounmodel, other motifs have a bls vector with all 0s
     val arr = Array.fill(thresholdListSize)(0)
+    // val nulvector = Array.fill(thresholdListSize)(0)
     val nulvector = new BlsVector(Array.fill(thresholdListSize)(0))
     val bgmodelMap = bgmodel.groupBy(identity).map(x => (x._1, x._2.size))
     val bgmodelVectors = ListBuffer[BlsVector]()
     for(d <- data) { // loop over smallest one? -> data (contains found motifs) or bgmodelmap (will contain random motifs not in data)
-      if(bgmodelMap.contains(d._1)) {
-        for(i <- 0 until bgmodelMap(d._1)) {
-          bgmodelVectors += d._2
+      if(bgmodelMap.contains(d.motif)) {
+        for(i <- 0 until bgmodelMap(d.motif)) {
+          bgmodelVectors += d.vector
         }
       }
     }
@@ -136,14 +139,18 @@ object BinaryDnaStringFunctions {
       bgmodelVectors += nulvector
     }
     for (i <- 0 until thresholdListSize) {
+      // arr(i) = findMedian(bgmodelVectors.map(x => x(i)).toList)
       arr(i) = findMedian(bgmodelVectors.map(x => x.getThresholdCount(i)).toList)
     }
     new BlsVector(arr)
+    // arr
   }
+
   def oldGetMedianPerThreshold(data: HashMap[ImmutableDna, BlsVector], bgmodel: ListBuffer[ImmutableDna], thresholdListSize: Int) : BlsVector = {
     // uses the existing motifs with corresponding bls vectors to determine the backgrounmodel, other motifs have a bls vector with all 0s
     val arr = Array.fill(thresholdListSize)(0)
     val nulvector = new BlsVector(Array.fill(thresholdListSize)(0))
+    // val nulvector = Array.fill(thresholdListSize)(0)
     val bgmodelMap = bgmodel.groupBy(identity).map(x => (x._1, x._2.size))
     val bgmodelVectors = ListBuffer[BlsVector]()
     for(d <- data) { // loop over smallest one? -> data (contains found motifs) or bgmodelmap (will contain random motifs not in data)
@@ -158,8 +165,10 @@ object BinaryDnaStringFunctions {
       bgmodelVectors += nulvector
     }
     for (i <- 0 until thresholdListSize) {
+      // arr(i) = findMedian(bgmodelVectors.map(x => x(i)).toList)
       arr(i) = findMedian(bgmodelVectors.map(x => x.getThresholdCount(i)).toList)
     }
+    // arr
     new BlsVector(arr)
   }
 

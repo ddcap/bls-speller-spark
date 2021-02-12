@@ -13,7 +13,7 @@ import org.apache.spark.sql.SparkSession
 import org.apache.spark.storage.StorageLevel
 import org.apache.spark.{SparkConf, SparkContext}
 import org.apache.spark.rdd.RDD
-import be.ugent.intec.ddecap.dna.BlsVector
+// import be.ugent.intec.ddecap.dna.BlsVector
 
 object BlsSpeller extends Logging {
   object LoggingMode extends Enumeration {
@@ -37,12 +37,13 @@ object BlsSpeller extends Logging {
       familyCountCutOff: Int = 1,
       onlyiterate: Boolean = false,
       mapSideCombine: Boolean = false,
-      useSecondIterator: Boolean = false,
+      useOldIterator: Boolean = false,
       similarityScore: Int = -1,
+      minimumPartitionsForSecondStep : Int = 512,
       backgroundModelCount: Int = 1000,
       confidenceScoreCutOff: Double = 0.5,
       thresholdList: List[Float] = List(0.15f, 0.5f, 0.6f, 0.7f, 0.9f, 0.95f),
-      persistLevel: StorageLevel = StorageLevel.MEMORY_AND_DISK,
+      persistLevel: StorageLevel = StorageLevel.MEMORY_AND_DISK_SER,
       loggingMode: LoggingMode = LoggingMode.NO_LOGGING
     )
 
@@ -110,25 +111,25 @@ object BlsSpeller extends Logging {
 
       opt[Int]("degen").action( (x, c) =>
         c.copy(maxDegen = x) ).text("Sets the max number of degenerate characters.").required()
-      opt[Int]("max_len").action( (x, c) =>
-        c.copy(maxMotifLen = x) ).text("Sets the maximum length of a motif, this is not inclusive (i.e. length < maxLength).").required()
 
       opt[Int]("fam_cutoff").action( (x, c) =>
         c.copy(familyCountCutOff = x) ).text("Sets the number of families a motif needs to be part of to be valid. Default is 1.")
       opt[Double]("conf_cutoff").action( (x, c) =>
         c.copy(confidenceScoreCutOff = x) ).text("Sets the cutoff for confidence scores. Default is 0.5.")
 
+        // currently not implemented in the c++ score! for merged counts...
+        // opt[Int]("max_len").action( (x, c) =>
+        // c.copy(maxMotifLen = x) ).text("Sets the maximum length of a motif, this is not inclusive (i.e. length < maxLength).").required()
+
 
       opt[String]("persist_level").action( (x, c) =>
           x match {
-            case "mem" => c.copy(persistLevel = StorageLevel.MEMORY_ONLY)
-            case "mem_ser" => c.copy(persistLevel = StorageLevel.MEMORY_ONLY_SER)
             case "mem_disk" => c.copy(persistLevel = StorageLevel.MEMORY_AND_DISK)
             case "mem_disk_ser" => c.copy(persistLevel = StorageLevel.MEMORY_AND_DISK_SER)
             case "disk" => c.copy(persistLevel = StorageLevel.DISK_ONLY)
             case _ => c.copy(persistLevel = StorageLevel.MEMORY_AND_DISK)
           }
-         ).text("Sets the persist level for RDD's: mem, mem_ser, mem_disk [default], mem_disk_ser, disk")
+         ).text("Sets the persist level for RDD's: mem_disk [default], mem_disk_ser, disk")
 
       opt[String]("logging_mode").action( (x, c) =>
         x match {
@@ -160,9 +161,9 @@ object BlsSpeller extends Logging {
             opt[Unit]("mapside_combine").action( (_, c) =>
               c.copy(mapSideCombine = true) ).text("Disables the map side combine."),
             opt[Unit]("old_iterator").action( (_, c) =>
-              c.copy(useSecondIterator = true) ).text("Use old way of iterating/merging. Uses a combinByKey with a Hashmap to collect motifs rather than using the Spark framework for this."),
+              c.copy(useOldIterator = true) ).text("Use old way of iterating/merging. Uses a combinByKey with a Hashmap to collect motifs rather than using the Spark framework for this."),
             opt[Int]("min_len").action( (x, c) =>
-              c.copy(minMotifLen = x) ).text("Sets the minimum length of a motif.").required(),
+              c.copy(minMotifLen = x, maxMotifLen = x + 1) ).text("Sets the minimum length of a motif.").required(),
             opt[Int]("bg_model_count").action( (x, c) =>
               c.copy(backgroundModelCount = x) ).text("Sets the count of motifs in the background model. Default is 1000."),
             opt[Int]("similarity_score").action( (x, c) =>
@@ -188,27 +189,39 @@ object BlsSpeller extends Logging {
   def runPipeline(config: Config) : Unit = {
     Timer.startTime()
     var tools = new Tools(config.bindir);
+    // info("setting # partitions to " + config.partitions)
     var families = tools.readOrthologousFamilies(config.input, config.partitions, sc);
-    val familiescount : Long = families.count
-    info("family count: " + familiescount );
+    // families.persist(StorageLevel.DISK_ONLY)
+    // val familiescount : Long = families.count
+    // info("family count: " + familiescount );
 
     if(config.mode == "getMotifs") {
-      var output = if(config.useSecondIterator)
+      var output = if(config.useOldIterator)
         {
           val motifs = tools.iterateMotifsOld(families, config.mode, config.alignmentBased, config.alphabet, config.maxDegen, config.minMotifLen, config.maxMotifLen, config.thresholdList);
-          val groupedMotifs = groupMotifsByGroup(motifs, config.thresholdList, config.partitions);
+          motifs.persist(config.persistLevel)
+          val groupedMotifs = groupMotifsByGroup(motifs, config.thresholdList, Math.max(config.minimumPartitionsForSecondStep, config.partitions));
           oldProcessGroups(groupedMotifs, config.thresholdList, config.backgroundModelCount, config.similarityScore, config.familyCountCutOff, config.confidenceScoreCutOff)
+        } else if(config.mapSideCombine)
+        {
+          // combinebykey
+          val motifs = tools.iterateMotifsAndMerge(families, config.mode, config.alignmentBased, config.alphabet, config.maxDegen, config.minMotifLen, config.maxMotifLen, config.thresholdList);
+          motifs.persist(StorageLevel.DISK_ONLY)
+          // motifs.count()
+          // families.unpersist();
+          val motifsWithBlsCounts = countAndCollectdMotifs(motifs, Math.max(config.minimumPartitionsForSecondStep, config.partitions)); // *2);
+          oldProcessGroups(motifsWithBlsCounts, config.thresholdList, config.backgroundModelCount, config.similarityScore, config.familyCountCutOff, config.confidenceScoreCutOff)
+          // reducebykey + combinebykey
+          // val motifs = tools.iterateMotifPairsAndMerge(families, config.mode, config.alignmentBased, config.alphabet, config.maxDegen, config.minMotifLen, config.maxMotifLen, config.thresholdList);
+          // motifs.persist(config.persistLevel)
+          // val motifsWithBlsCounts = countBlsMergedMotifs(motifs, Math.max(config.minimumPartitionsForSecondStep, config.partitions));
+          // val groupedMotifs = groupMotifsWithBlsCount(motifsWithBlsCounts, Math.max(config.minimumPartitionsForSecondStep, config.partitions));
+          // processGroups(groupedMotifs, config.thresholdList, config.backgroundModelCount, config.similarityScore, config.familyCountCutOff, config.confidenceScoreCutOff)
         } else {
-          val groupedMotifs = if(config.mapSideCombine)
-            {
-              val motifs = tools.iterateMotifsAndMerge(families, config.mode, config.alignmentBased, config.alphabet, config.maxDegen, config.minMotifLen, config.maxMotifLen, config.thresholdList);
-              val motifsWithBlsCounts = countBlsMergedMotifs(motifs, config.partitions);
-              groupMotifsWithBlsCount(motifsWithBlsCounts, config.partitions);
-            } else {
-              val motifs = tools.iterateMotifs(families, config.mode, config.alignmentBased, config.alphabet, config.maxDegen, config.minMotifLen, config.maxMotifLen, config.thresholdList);
-              val motifsWithBlsCounts = countBls(motifs, config.thresholdList, config.partitions);
-              groupMotifsWithBlsCount(motifsWithBlsCounts, config.partitions);
-            }
+          val motifs = tools.iterateMotifs(families, config.mode, config.alignmentBased, config.alphabet, config.maxDegen, config.minMotifLen, config.maxMotifLen, config.thresholdList);
+          motifs.persist(config.persistLevel)
+          val motifsWithBlsCounts = countBls(motifs, config.thresholdList, Math.max(config.minimumPartitionsForSecondStep, config.partitions));
+          val groupedMotifs = groupMotifsWithBlsCount(motifsWithBlsCounts, Math.max(config.minimumPartitionsForSecondStep, config.partitions));
           processGroups(groupedMotifs, config.thresholdList, config.backgroundModelCount, config.similarityScore, config.familyCountCutOff, config.confidenceScoreCutOff)
         }
 
@@ -219,6 +232,7 @@ object BlsSpeller extends Logging {
         // motifs.map(x => (x._1.map(b => toBinary(b, 8)).mkString(" ") + "\t" + x._2._1.map(b => toBinary(b, 8)).mkString(" ") + "\t" + toBinary(x._2._2, 8))).saveAsTextFile(config.output);
       // else
       output.map(x => (LongToDnaString(x._1, getDnaLength(x._4)) + "\t" + x._2 + "\t" + x._3.mkString("\t") + "\t")).saveAsTextFile(config.output);
+      // families.unpersist()
 
 
   // for testing can write other rdd's to output:

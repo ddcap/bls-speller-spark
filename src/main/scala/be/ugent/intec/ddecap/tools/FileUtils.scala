@@ -5,8 +5,10 @@ import org.apache.hadoop.fs.{FileSystem, Path}
 import java.io.{File, PrintWriter}
 import org.apache.spark.SparkContext
 import be.ugent.intec.ddecap.Logging
+import org.apache.log4j.{Level, Logger}
 
-object FileUtils extends Logging {
+object FileUtils {
+  val logger = Logger.getLogger("be.ugent.intec.ddecap.tools.FileUtils");
   def downloadFile(conf: Configuration, filename: String, localDirectory: String) {
     val fs = FileSystem.get(conf);
     fs.copyToLocalFile(false, new Path(filename), new Path(localDirectory ), true);
@@ -17,7 +19,7 @@ object FileUtils extends Logging {
     val localDir = new Path(localDirectory)
     val statuses = fs.listStatus(new Path(directory));
     for(status <- statuses){
-      debug(status.getPath().toString());
+      logger.debug(status.getPath().toString());
       fs.copyToLocalFile(false, status.getPath(), localDir, true);
    }
   }

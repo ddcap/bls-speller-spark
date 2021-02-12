@@ -15,14 +15,12 @@ import org.apache.log4j.Level
 import org.apache.log4j.Logger
 import org.apache.spark.BinaryPipedRDD
 import java.nio.ByteBuffer
-import be.ugent.intec.ddecap.dna.BlsVector
 import be.ugent.intec.ddecap.dna.BlsVectorFunctions._
+import be.ugent.intec.ddecap.dna.{ImmutableDnaPair, ImmutableDnaWithBlsVectorByte, BlsVector, ImmutableDnaWithBlsVector}
 
 @SerialVersionUID(227L)
 class Tools(val bindir: String) extends Serializable with Logging {
-  type ContentWithMotifAndBls = (Array[Byte], (Array[Byte], Byte)) // TODO replace this where possible
-  type ImmutableDna = Vector[Byte]
-
+  type ImmutableDna = Long
   val DegenerationTable = Map(
     'A' -> 1,
     'B' -> 3,
@@ -87,36 +85,7 @@ class Tools(val bindir: String) extends Serializable with Logging {
     }
     buf
   }
-  val longBytes = 8
-  private def toLongPairFormat(rdd: RDD[String]) : RDD[Iterator[(Long, (Long, Byte))]] = {
-    rdd.map(x => {
-      val famBuffer : ByteBuffer = ByteBuffer.wrap(x.getBytes)
 
-      new Iterator[(Long, (Long, Byte))] {
-        def next(): (Long, (Long, Byte)) = {
-          if (!hasNext()) {
-            throw new NoSuchElementException()
-          }
-          val onelong : Array[Byte] = Array.fill(8)(10); // 10 is newline!
-          famBuffer.get(onelong, 0,  Math.min(longBytes, famBuffer.limit() - famBuffer.position()))
-          (ByteBuffer.wrap(onelong).getLong(), (0, 0))
-        }
-        def hasNext(): Boolean = {
-          if (famBuffer.position() < famBuffer.limit())
-            true
-          else
-            false
-        }
-      }
-    })
-  }
-
-  private def toBinaryPairFormat(rdd: RDD[String]) : RDD[((ImmutableDna, ImmutableDna), Byte)] = {
-    rdd.map(x => ( (x.getBytes.toVector,Vector()), 0x0))
-  }
-  private def toBlsVectorPairFormat(rdd: RDD[String], len: Int) : RDD[((ImmutableDna, ImmutableDna), BlsVector)] = {
-    rdd.map(x => ((x.getBytes.toVector, Vector()), getEmptyBlsVector(len)))
-  }
   private def toBinaryFormat(rdd: RDD[String]) : RDD[Array[Byte]] = {
     rdd.map(x => x.getBytes)
   }
@@ -187,10 +156,10 @@ class Tools(val bindir: String) extends Serializable with Logging {
     })
   }
 
-  def getCommand(mode: String, alignmentBased: Boolean, thresholdList: List[Float], alphabet: Int, maxDegen: Int, minMotifLen: Int, maxMotifLen: Int) : Seq[String] = {
+  def getCommand(mode: String, alignmentBased: Boolean, thresholdList: List[Float], alphabet: Int, maxDegen: Int, minMotifLen: Int, maxMotifLen: Int, counted : Boolean =  false) : Seq[String] = {
     mode match {
       case "getMotifs" => tokenize( binary + " - " + (if (alignmentBased) AlignmentBasedCommand else AlignmentFreeCommand) + " " + alphabet  + " " +
-                           thresholdList.mkString(",") + " " + maxDegen + " " + minMotifLen + " " + maxMotifLen)
+                           thresholdList.mkString(",") + " " + maxDegen + " " + minMotifLen + " " + maxMotifLen + (if (counted) " true" else ""))
       case "locateMotifs" => tokenize( binary + " - " + (if (alignmentBased) AlignmentBasedCommand else AlignmentFreeCommand) + " " +
                            thresholdList.mkString(",") + " " + maxDegen + " " + maxMotifLen)
       case _ => throw new Exception("invalid Mode")
@@ -213,7 +182,7 @@ class Tools(val bindir: String) extends Serializable with Logging {
   def locateMotifs(families: RDD[String], mode: String, motifs: Broadcast[Array[String]], alignmentBased: Boolean,
     maxDegen: Int, maxMotifLen: Int, thresholdList: List[Float]) : RDD[((String, Int), (String, Float))] = {
 
-    val preppedFamiliesAndMotifs = families.map(x => x + motifs.value.mkString("\n") + "\n")
+    val preppedFamiliesAndMotifs = families.map(x => (x + motifs.value.mkString("\n") + "\n"))
     val motifWithLocations = preppedFamiliesAndMotifs.pipe(getCommand(mode, alignmentBased, thresholdList, 0, maxDegen, 0, maxMotifLen))
     val locations = motifWithLocations.flatMap(x => {
       val split = x.split("\t")
@@ -254,24 +223,31 @@ class Tools(val bindir: String) extends Serializable with Logging {
 
   def iterateMotifsOld(input: RDD[String], mode: String, alignmentBased: Boolean, alphabet: Int,
     maxDegen: Int, minMotifLen: Int, maxMotifLen: Int,
-    thresholdList: List[Float]) : RDD[(Long, (Long, Byte))] = {
+    thresholdList: List[Float]) : RDD[(ImmutableDna, ImmutableDnaWithBlsVectorByte)] = {
 
-    (new org.apache.spark.OldBinaryPipedRDD(toBinaryFormat(input), getCommand(mode, alignmentBased, thresholdList, alphabet,
+    (new org.apache.spark.OldBinaryPipedRDD(input, getCommand(mode, alignmentBased, thresholdList, alphabet,
       maxDegen, minMotifLen, maxMotifLen), "motifIterator", maxMotifLen)).flatMap(identity)
   }
 
   def iterateMotifs(input: RDD[String], mode: String, alignmentBased: Boolean, alphabet: Int,
     maxDegen: Int, minMotifLen: Int, maxMotifLen: Int,
-    thresholdList: List[Float]) : RDD[((Long, Long), Byte)] = {
+    thresholdList: List[Float]) : RDD[(ImmutableDnaPair, Byte)] = {
 
-    (new org.apache.spark.IteratedBinaryPipedRDD(toBinaryFormat(input), getCommand(mode, alignmentBased, thresholdList, alphabet,
+    (new org.apache.spark.IteratedBinaryPipedRDD(input, getCommand(mode, alignmentBased, thresholdList, alphabet,
       maxDegen, minMotifLen, maxMotifLen), "motifIterator", maxMotifLen)).flatMap(identity)
   }
 
+  def iterateMotifPairsAndMerge(input: RDD[String], mode: String, alignmentBased: Boolean, alphabet: Int,
+    maxDegen: Int, minMotifLen: Int, maxMotifLen: Int,
+    thresholdList: List[Float]) : RDD[(ImmutableDnaPair, BlsVector)] = {
+    (new org.apache.spark.CountedPairBinaryPipedRDD(input, getCommand(mode, alignmentBased, thresholdList, alphabet,
+      maxDegen, minMotifLen, maxMotifLen, true), "motifIterator", maxMotifLen, thresholdList.length))
+  }
   def iterateMotifsAndMerge(input: RDD[String], mode: String, alignmentBased: Boolean, alphabet: Int,
     maxDegen: Int, minMotifLen: Int, maxMotifLen: Int,
-    thresholdList: List[Float]) : RDD[((Long, Long), BlsVector)] = {
-    (new org.apache.spark.BlsVectorBinaryPipedRDD(toBinaryFormat(input), getCommand(mode, alignmentBased, thresholdList, alphabet,
-      maxDegen, minMotifLen, maxMotifLen), "motifIterator", maxMotifLen, thresholdList.length)) //.flatMap(identity)
+    thresholdList: List[Float]) : RDD[(ImmutableDna, ImmutableDnaWithBlsVector)] = {
+      (new org.apache.spark.CountedBinaryPipedRDD( input , getCommand(mode, alignmentBased, thresholdList, alphabet,
+        maxDegen, minMotifLen, maxMotifLen, true), "motifIterator", maxMotifLen, thresholdList.length))
   }
+
 }

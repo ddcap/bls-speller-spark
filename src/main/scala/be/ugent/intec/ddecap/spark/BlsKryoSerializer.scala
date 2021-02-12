@@ -18,16 +18,11 @@ class BlsKryoSerializer extends KryoRegistrator with Logging {
   override def registerClasses(kryo: Kryo) {
     kryo.register(classOf[Array[Byte]]);
     kryo.register(classOf[be.ugent.intec.ddecap.dna.BlsVector]);
-    kryo.register(classOf[scala.collection.mutable.ListBuffer[(List[Byte], be.ugent.intec.ddecap.dna.BlsVector)]]);
+    kryo.register(classOf[scala.collection.mutable.ListBuffer[(List[Byte], be.ugent.intec.ddecap.dna.BlsVector)]]); //  Array[Int])]]);
     registerByName(kryo, "scala.reflect.ClassTag$GenericClassTag")
-    // kryo.register(classOf[scala.reflect.ClassTag$GenericClassTag]);
-    // kryo.register(classOf[org.apache.spark.internal.io.FileCommitProtocol$TaskCommitMessage]);
-    // for sparkmeasure:
-    // kryo.register(classOf[scala.reflect.ClassTag$$anon$1]);
-    // kryo.register(classOf[Array[org.apache.spark.sql.catalyst.InternalRow]]);
-    // kryo.register(classOf[org.apache.spark.sql.catalyst.InternalRow]);
-    // kryo.register(classOf[org.apache.spark.sql.execution.datasources.WriteTaskResult]);
-    // kryo.register(classOf[org.apache.spark.sql.execution.datasources.ExecutedWriteSummary]);
-    // kryo.register(classOf[org.apache.spark.sql.execution.datasources.BasicWriteTaskStats]);
+    kryo.register(classOf[be.ugent.intec.ddecap.dna.SimilarityScoreType]);
+    kryo.register(classOf[be.ugent.intec.ddecap.dna.ImmutableDnaPair]);
+    kryo.register(classOf[be.ugent.intec.ddecap.dna.ImmutableDnaWithBlsVectorByte]);
+    kryo.register(classOf[be.ugent.intec.ddecap.dna.ImmutableDnaWithBlsVector]);
   }
 }

@@ -3,37 +3,13 @@ package be.ugent.intec.ddecap.spark
 import org.apache.spark.Partitioner
 import be.ugent.intec.ddecap.Logging
 import scala.collection.mutable.WrappedArray
+import be.ugent.intec.ddecap.dna.ImmutableDnaPair
 
-class DnaStringPartitioner(val maxNumPart: Int) extends Partitioner with Logging {
+class DnaStringPartitioner(val maxNumPart: Int) extends Partitioner with be.ugent.intec.ddecap.Logging {
   override def getPartition(key: Any): Int = {
     key match {
-      // case (dnastring: WrappedArray[Byte]) => { // is Seq[Byte]
-      //   var hashCode: Int  = dnastring(1) // cause first bit is always length! and can be same...
-      //   for(i <- 2 until Math.max(5, dnastring.size)) {
-      //     hashCode |= dnastring(i) << (8*(i-1))
-      //   }
-      //   for(i <- 5 until dnastring.size) {
-      //     hashCode ^= dnastring(i) << (8*((i-1)%4))
-      //   }
-      //   // info("hash: " + hashCode)
-      //   Math.abs(hashCode % maxNumPart)
-      // }
-      // case (dnastring: Vector[Byte]) => {
-      //   Math.abs(dnastring.hashCode % maxNumPart)
-      // }
-      // case (dnastring: Array[Byte]) => {
-      //   var hashCode: Int  = dnastring(1) // start at second byte since first byte is always length! and can be same...
-      //   for(i <- 2 until Math.max(5, dnastring.size)) {
-      //     hashCode |= dnastring(i) << (8*(i-1))
-      //   }
-      //   for(i <- 5 until dnastring.size) {
-      //     hashCode ^= dnastring(i) << (8*((i-1)%4))
-      //   }
-      //   // info("hash: " + hashCode)
-      //   Math.abs(hashCode % maxNumPart)
-      // }
       case (l: Long) => Math.abs(l.hashCode % maxNumPart)
-      case (motif: Long, grp: Long) => Math.abs(grp.hashCode % maxNumPart)
+      case (motifPair: ImmutableDnaPair) => Math.abs(motifPair.group.hashCode % maxNumPart)
       case _ => {error("failed key is: " + key); throw new ClassCastException("failed key is: " + key)}
     }
   }
