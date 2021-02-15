@@ -158,7 +158,7 @@ class CountedPairBinaryPipedRDD[T: ClassTag](
     //    group    motif <-- (4 bytes since 2 chars per byte and theres 8 chars)
     // 8 - - - -  - - - -  bls
     val wordSize = (maxMotifLen >> 1)
-    val blscounttypesize = 1;
+    val blscounttypesize = 2;
     val totalMotifSize = 2 * wordSize + 2 + blscounttypesize * thresholdListSize // short numbers
     val grp: Array[Byte] = Array.fill(longBytes)(0x0);
     val wrd: Array[Byte] = Array.fill(longBytes)(0x0);
@@ -184,7 +184,7 @@ class CountedPairBinaryPipedRDD[T: ClassTag](
         blsvec = wrd(wordSize) // this is the amount of bytes that should be read next.
         wrd(wordSize) = 0 // needs to be set 0 so we can group by long instead of having the bls vector differentiating the same motif
         buf.get(blsvecdata, 0, blscounttypesize * thresholdListSize)
-        (ImmutableDnaPair(ByteBuffer.wrap(wrd).getLong(), ByteBuffer.wrap(grp).getLong()),  getBlsVectorFromCharList(blsvecdata, blsvec))
+        (ImmutableDnaPair(ByteBuffer.wrap(wrd).getLong(), ByteBuffer.wrap(grp).getLong()),  getBlsVectorFromShortList(blsvecdata, blsvec))
       }
       def hasNext(): Boolean = {
         val result = if (buf.position() + totalMotifSize <= buf.limit())

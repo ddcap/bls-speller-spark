@@ -122,11 +122,11 @@ object RDDFunctions {
     }
 
 
-    val emitRandomLowConfidenceScoreMotifs = 100000;
     def processGroups(input: RDD[(ImmutableDna, List[ImmutableDnaWithBlsVector])],
         thresholdList: List[Float],
         backgroundModelCount: Int, similarityScore: Int,
-        familyCountCutOff: Int, confidenceScoreCutOff: Double) :
+        familyCountCutOff: Int, confidenceScoreCutOff: Double,
+        emitRandomLowConfidenceScoreMotifs: Int = 0) :
         RDD[(ImmutableDna, BlsVector, List[Float], ImmutableDna)] = {
       input.flatMap(x => { // x is an iterator over the motifs+blsvector in this group
         val key = x._1
@@ -151,7 +151,7 @@ object RDDFunctions {
               // emit motif if any Ti has a valid cutoff
               thresholds_passed = true;
             } else {
-              if (rnd.nextInt(emitRandomLowConfidenceScoreMotifs) == 0){
+              if (emitRandomLowConfidenceScoreMotifs > 0 && rnd.nextInt(emitRandomLowConfidenceScoreMotifs) == 0){
                 // logger.info("emitting motif below c threshold " + confidenceScoreCutOff + " for tests.")
                 thresholds_passed = true;
               }
@@ -168,7 +168,8 @@ object RDDFunctions {
     def oldProcessGroups(input: RDD[(ImmutableDna, HashMap[ImmutableDna, BlsVector])],
         thresholdList: List[Float],
         backgroundModelCount: Int, similarityScore: Int,
-        familyCountCutOff: Int, confidenceScoreCutOff: Double) :
+        familyCountCutOff: Int, confidenceScoreCutOff: Double,
+        emitRandomLowConfidenceScoreMotifs: Int = 0) :
         RDD[(ImmutableDna, BlsVector, List[Float], ImmutableDna)] = {
       input.flatMap(x => { // x is an iterator over the motifs+blsvector in this group
         val key = x._1
@@ -193,7 +194,7 @@ object RDDFunctions {
               // emit motif if any Ti has a valid cutoff
               thresholds_passed = true;
             } else {
-              if (rnd.nextInt(emitRandomLowConfidenceScoreMotifs) == 0){
+              if (emitRandomLowConfidenceScoreMotifs > 0 && rnd.nextInt(emitRandomLowConfidenceScoreMotifs) == 0){
                 // logger.info("emitting motif below c threshold " + confidenceScoreCutOff + " for tests.")
                 thresholds_passed = true;
               }
