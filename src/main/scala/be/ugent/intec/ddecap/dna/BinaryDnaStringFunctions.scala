@@ -39,11 +39,36 @@ object BinaryDnaStringFunctions {
     orderedbgmodel.take(backgroundModelCount)
   }
 
+
+  private def fact(n: Int) : Int = {
+    var f = 1
+    for (i <- 2 to n) {
+      f = f * i
+    }
+    return f
+  }
+
+  private final val bgCountFactor = 4
+  private final val bgCountMinimum = 1000
+  private def getNumberOfPermutations(chars: ListBuffer[Long]): Int = {
+    val charcounts = chars.groupBy(identity).map(x => (x._1, x._2.size))
+    var tmp = 1
+    for (c <- charcounts) {
+    	tmp = tmp * fact(c._2)
+    }
+    return fact(chars.size)/tmp
+  }
+  private def getBgCountBasedOnNumberOfPermutations(chars: ListBuffer[Long]): Int = {
+    val permutations = getNumberOfPermutations(chars)
+    return Math.max(bgCountMinimum,bgCountFactor*permutations)
+  }
+
   private def generateBackgroundModel(key: ImmutableDna, backgroundModelCount: Int) : ListBuffer[ImmutableDna] = {
     // generate x permutations of this key motif
     val ret = ListBuffer[ImmutableDna]()
     val chars = getDnaContent(key)
-    for (tmp <- 0 until backgroundModelCount) {
+    val bgcount = if(backgroundModelCount > 0) backgroundModelCount else (getBgCountBasedOnNumberOfPermutations(chars))
+    for (tmp <- 0 until bgcount) {
       val shuffledIdx = util.Random.shuffle[Int, IndexedSeq](0 until chars.size)
       // random order of chars
       var newdata: Long = 0
@@ -104,8 +129,8 @@ object BinaryDnaStringFunctions {
 
 
 
-  def chooseRandomPivot(arr: List[Int]): Int = arr(scala.util.Random.nextInt(arr.size))
-  @tailrec final def findKMedian(arr: List[Int], k: Int): Int = {
+  def chooseRandomPivot(arr: Seq[Int]): Int = arr(scala.util.Random.nextInt(arr.size))
+  @tailrec final def findKMedian(arr: Seq[Int], k: Int): Int = {
       val a = chooseRandomPivot(arr)
       val (s, b) = arr partition (a >)
       if (s.size == k) a
@@ -117,16 +142,32 @@ object BinaryDnaStringFunctions {
       } else if (s.size < k) findKMedian(b, k - s.size)
       else findKMedian(s, k)
   }
-  def findMedian(arr: List[Int]) = findKMedian(arr, (arr.size - 1) / 2)
+  def findMedian(arr: Seq[Int]) = findKMedian(arr, (arr.size - 1) / 2)
 
+  def getMedianPerThreshold(key: ImmutableDna, data: List[ImmutableDnaWithBlsVector], thresholdListSize: Int) : BlsVector = {
+    val chars = getDnaContent(key)
+    val perms = getNumberOfPermutations(chars)
+    if(perms == 1) return data(0).vector
+    else {
+      val nr = (perms + 1) / 2
+      val arr = Array.fill(thresholdListSize)(0)
+      if(data.size > nr) {
+        val k = data.size - nr - 1
+        for (i <- 0 until thresholdListSize) {
+          arr(i) = findKMedian(data.map(x => x.vector.getThresholdCount(i)), k)
+        }
+      }
+      new BlsVector(arr)
+    }
+  }
 
   def getMedianPerThreshold(data: List[ImmutableDnaWithBlsVector], bgmodel: ListBuffer[ImmutableDna], thresholdListSize: Int) : BlsVector = {
     // uses the existing motifs with corresponding bls vectors to determine the backgrounmodel, other motifs have a bls vector with all 0s
     val arr = Array.fill(thresholdListSize)(0)
-    // val nulvector = Array.fill(thresholdListSize)(0)
     val nulvector = new BlsVector(Array.fill(thresholdListSize)(0))
-    val bgmodelMap = bgmodel.groupBy(identity).map(x => (x._1, x._2.size))
+    val bgmodelMap = bgmodel.groupBy(identity).map(x => (x._1, x._2.size)) // just a map to get contains function, can be set as well?
     val bgmodelVectors = ListBuffer[BlsVector]()
+
     for(d <- data) { // loop over smallest one? -> data (contains found motifs) or bgmodelmap (will contain random motifs not in data)
       if(bgmodelMap.contains(d.motif)) {
         for(i <- 0 until bgmodelMap(d.motif)) {
@@ -134,23 +175,19 @@ object BinaryDnaStringFunctions {
         }
       }
     }
-    // logger.info("bgmodelVectors.size: " + bgmodelVectors.size);
     for (i <- bgmodelVectors.size until bgmodel.size) {
       bgmodelVectors += nulvector
     }
     for (i <- 0 until thresholdListSize) {
-      // arr(i) = findMedian(bgmodelVectors.map(x => x(i)).toList)
-      arr(i) = findMedian(bgmodelVectors.map(x => x.getThresholdCount(i)).toList)
+      arr(i) = findMedian(bgmodelVectors.map(x => x.getThresholdCount(i)))
     }
     new BlsVector(arr)
-    // arr
   }
 
   def oldGetMedianPerThreshold(data: HashMap[ImmutableDna, BlsVector], bgmodel: ListBuffer[ImmutableDna], thresholdListSize: Int) : BlsVector = {
     // uses the existing motifs with corresponding bls vectors to determine the backgrounmodel, other motifs have a bls vector with all 0s
     val arr = Array.fill(thresholdListSize)(0)
     val nulvector = new BlsVector(Array.fill(thresholdListSize)(0))
-    // val nulvector = Array.fill(thresholdListSize)(0)
     val bgmodelMap = bgmodel.groupBy(identity).map(x => (x._1, x._2.size))
     val bgmodelVectors = ListBuffer[BlsVector]()
     for(d <- data) { // loop over smallest one? -> data (contains found motifs) or bgmodelmap (will contain random motifs not in data)
@@ -160,65 +197,13 @@ object BinaryDnaStringFunctions {
         }
       }
     }
-    // logger.info("bgmodelVectors.size: " + bgmodelVectors.size);
     for (i <- bgmodelVectors.size until bgmodel.size) {
       bgmodelVectors += nulvector
     }
     for (i <- 0 until thresholdListSize) {
-      // arr(i) = findMedian(bgmodelVectors.map(x => x(i)).toList)
-      arr(i) = findMedian(bgmodelVectors.map(x => x.getThresholdCount(i)).toList)
+      arr(i) = findMedian(bgmodelVectors.map(x => x.getThresholdCount(i)))
     }
-    // arr
     new BlsVector(arr)
   }
-
-  // def dnaWithoutLenToString(data: ImmutableDna, len: Byte) : String = {
-  //   var ret = "";
-  //   for (i <- 0 until len) {
-  //     if(i % 2 == 0) {
-  //       ret += byteToAscii(data(i / 2) & 0xf)
-  //     } else {
-  //       ret += byteToAscii((data(i / 2)  >> 4) & 0xf)
-  //     }
-  //   }
-  //   ret;
-  // }
-  // def dnaToString(data: ImmutableDna) : String = {
-  //   val len = data(0);
-  //   var ret = "";
-  //   for (i <- 0 until len) {
-  //     if(i % 2 == 0) {
-  //       ret += byteToAscii(data(1+i / 2) & 0xf)
-  //     } else {
-  //       ret += byteToAscii((data(1+i / 2)  >> 4) & 0xf)
-  //     }
-  //   }
-  //   ret;
-  // }
-
-  // def stringToDNA(data: String): ImmutableDna = {
-  //   val output = new Array[Byte](1 + (data.length.toDouble / 2).round.toInt)
-  //   // Add length string to start
-  //   output(0) = data.length.toByte
-  //   var current_byte : Byte = 0x0
-  //   var i = 0
-  //   for (char <- data) {
-  //     val index = byteToAscii.indexOf(char)
-  //     if (i % 2 == 0) {
-  //       // char_index = bytes (>> 4) & 0xf
-  //       // bytes =
-  //       current_byte = index.toByte
-  //     } else {
-  //       current_byte = (current_byte.toInt | index.toByte << 4).toByte
-  //       output(1+ (i-1) / 2) = current_byte
-  //     }
-  //     // add last unfinished byte if present
-  //     if (i % 2 == 0) {
-  //       output(1+ i / 2) = current_byte
-  //     }
-  //     i += 1
-  //   }
-  //   output.toVector
-  // }
 
 }

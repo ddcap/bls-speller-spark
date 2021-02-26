@@ -128,17 +128,14 @@ object RDDFunctions {
         familyCountCutOff: Int, confidenceScoreCutOff: Double,
         emitRandomLowConfidenceScoreMotifs: Int = 0) :
         RDD[(ImmutableDna, BlsVector, List[Float], ImmutableDna)] = {
-      input.flatMap(x => { // x is an iterator over the motifs+blsvector in this group
-        val key = x._1
-        val data = x._2
-        logger.info(data.size + " motifs in this group")
+      input.flatMap(x => { // x is group + motifs+blsvector list
+        val key = x._1 // motif group (based on character content)
+        val data = x._2 // list of motifs with same character content with corresponding blsvector
+        // logger.info(data.size + " motifs in this group")
         val rnd = new scala.util.Random
-        // var starttime = System.nanoTime
-        val bgmodel = generateBackgroundModel(key, backgroundModelCount, similarityScore)
-        val median : BlsVector = getMedianPerThreshold(data, bgmodel, thresholdList.size)
-        // logger.info("[" + key + " bg model] time (s): "+(System.nanoTime-starttime)/1.0e9)
-        // logger.info(dnaToString(key) + " median: " + median)
-        // starttime = System.nanoTime
+        // val bgmodel = generateBackgroundModel(key, backgroundModelCount, similarityScore)
+        // val median : BlsVector = getMedianPerThreshold(data, bgmodel, thresholdList.size)
+        val median : BlsVector = getMedianPerThreshold(key, data, thresholdList.size)
         val retlist = ListBuffer[(ImmutableDna, BlsVector, List[Float], ImmutableDna)]()
         for( d <- data) { // for each motif calculate every F(Ti) and corresponding C(Ti)
           val conf_score_vector = Array.fill(thresholdList.size)(0.0f)
@@ -165,7 +162,7 @@ object RDDFunctions {
         })
     }
 
-    def oldProcessGroups(input: RDD[(ImmutableDna, HashMap[ImmutableDna, BlsVector])],
+    def processHashMapGroups(input: RDD[(ImmutableDna, HashMap[ImmutableDna, BlsVector])],
         thresholdList: List[Float],
         backgroundModelCount: Int, similarityScore: Int,
         familyCountCutOff: Int, confidenceScoreCutOff: Double,

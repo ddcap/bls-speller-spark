@@ -5,6 +5,7 @@ import scala.collection.mutable.ListBuffer
 
 object LongEncodedDna {
   private final val byteToAscii = Array(' ', 'A', 'C', 'M', 'G', 'R', 'S', 'V', 'T', 'W', 'Y', 'H', 'K', 'D', 'B', 'N')
+  private final val asciiToByte = Map('A'->1l, 'C'->2l, 'M'->3l, 'G'->4l, 'R'->5l, 'S'->6l, 'V'->7l, 'T'->8l, 'W'->9l, 'Y'->10l, 'H'->11l, 'K'->12l, 'D'->13l, 'B'->14l, 'N'->15l)
   val logger = Logger.getLogger("be.ugent.intec.ddecap.dna.LongEncodedDna");
   type ImmutableDna = Long
 
@@ -20,7 +21,7 @@ object LongEncodedDna {
         chars += (data >> (52 - (4*i)) & 0xf) // this has length:  // 52 here since no length 60 - 8
     }
     chars
-  }
+  }  
 
   def randomDnaStringWithLength(length: Int) : Long = {
     assert(length < 15);
@@ -41,6 +42,25 @@ object LongEncodedDna {
       newdata |= (c << (60 - (4*i))).toLong
     }
     newdata;
+  }
+  def DnaStringToLongWithLength(motif: String) : Long = {
+    val length = motif.length
+    var newdata: Long = 0
+    for (i <- 0 until length) {
+      val c = asciiToByte(motif(i))
+      newdata |= (c << (52 - (4*i))).toLong
+    }
+    newdata | (length.toLong << 56)
+  }
+
+  def DnaStringToLong(motif: String) : Long = {
+    val length = motif.length
+    var newdata: Long = 0
+    for (i <- 0 until length) {
+      val c = asciiToByte(motif(i))
+      newdata |= (c << (60 - (4*i))).toLong
+    }
+    newdata;  
   }
 
   def LongToDnaString(data: ImmutableDna) : String = {

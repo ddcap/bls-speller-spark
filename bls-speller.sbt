@@ -25,7 +25,7 @@ javaOptions ++= Seq("-Xms512M", "-Xmx2048M", "-XX:MaxPermSize=2048M", "-XX:+CMSC
 parallelExecution in Test := false
 
 test in assembly := {}
-excludeFilter in unmanagedSources := "test-code.scala"
+excludeFilter in unmanagedSources := "test-code*.scala"
 
 // From https://stackoverflow.com/questions/23280494/sbt-assembly-error-deduplicate-different-file-contents-found-in-the-following
 assemblyMergeStrategy in assembly := {

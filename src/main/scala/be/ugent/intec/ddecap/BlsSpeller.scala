@@ -40,8 +40,8 @@ object BlsSpeller extends Logging {
       useOldIterator: Boolean = false,
       similarityScore: Int = -1,
       emitRandomLowConfidenceScoreMotifs: Int = 0,
-      minimumPartitionsForSecondStep : Int = 512,
-      backgroundModelCount: Int = 1000,
+      minimumPartitionsForSecondStep : Int = 8,
+      backgroundModelCount: Int = -1,
       confidenceScoreCutOff: Double = 0.5,
       thresholdList: List[Float] = List(0.15f, 0.5f, 0.6f, 0.7f, 0.9f, 0.95f),
       persistLevel: StorageLevel = StorageLevel.MEMORY_AND_DISK_SER,
@@ -96,7 +96,7 @@ object BlsSpeller extends Logging {
 
   def parseOptionsAndStart(args: Array[String]) : Option[Config] = {
     val parser = new scopt.OptionParser[Config]("bls-speller") {
-      head("BLS Speller", "0.1")
+      head("BLS Speller", "0.2")
 
       opt[String]('i', "input").action( (x, c) =>
         c.copy(input = x) ).text("Location of the input files.").required()
@@ -130,7 +130,7 @@ object BlsSpeller extends Logging {
             case "disk" => c.copy(persistLevel = StorageLevel.DISK_ONLY)
             case _ => c.copy(persistLevel = StorageLevel.MEMORY_AND_DISK)
           }
-         ).text("Sets the persist level for RDD's: mem_disk [default], mem_disk_ser, disk")
+         ).text("Sets the persist level for RDD's: mem_disk, mem_disk_ser [default], disk")
 
       opt[String]("logging_mode").action( (x, c) =>
         x match {
@@ -166,7 +166,7 @@ object BlsSpeller extends Logging {
             opt[Int]("min_len").action( (x, c) =>
               c.copy(minMotifLen = x, maxMotifLen = x + 1) ).text("Sets the minimum length of a motif.").required(),
             opt[Int]("bg_model_count").action( (x, c) =>
-              c.copy(backgroundModelCount = x) ).text("Sets the count of motifs in the background model. Default is 1000."),
+              c.copy(backgroundModelCount = x) ).text("Sets the count of motifs in the background model. Default is -1: count is based on the number of permutations of the group."),
             opt[Int]("similarity_score").action( (x, c) =>
               c.copy(similarityScore = x) ).text("Uses a similarity score to find the most dissimilar motifs in the background model. 0: Binary diff, 1: Hamming distance, 2: Levenshtein distance, Default is -1 [disabled]."),
             opt[Int]("emitrandommotifs").action( (x, c) =>
@@ -203,20 +203,21 @@ object BlsSpeller extends Logging {
           val motifs = tools.iterateMotifsOld(families, config.mode, config.alignmentBased, config.alphabet, config.maxDegen, config.minMotifLen, config.maxMotifLen, config.thresholdList);
           motifs.persist(config.persistLevel)
           val groupedMotifs = groupMotifsByGroup(motifs, config.thresholdList, Math.max(config.minimumPartitionsForSecondStep, config.partitions));
-          oldProcessGroups(groupedMotifs, config.thresholdList, config.backgroundModelCount, config.similarityScore, config.familyCountCutOff, config.confidenceScoreCutOff, config.emitRandomLowConfidenceScoreMotifs)
+          processHashMapGroups(groupedMotifs, config.thresholdList, config.backgroundModelCount, config.similarityScore, config.familyCountCutOff, config.confidenceScoreCutOff, config.emitRandomLowConfidenceScoreMotifs)
         } else if(config.mapSideCombine)
         {
           // combinebykey
-          // val motifs = tools.iterateMotifsAndMerge(families, config.mode, config.alignmentBased, config.alphabet, config.maxDegen, config.minMotifLen, config.maxMotifLen, config.thresholdList);
-          // motifs.persist(config.persistLevel)
-          // val motifsWithBlsCounts = countAndCollectdMotifs(motifs, Math.max(config.minimumPartitionsForSecondStep, config.partitions)); // *2);
-          // oldProcessGroups(motifsWithBlsCounts, config.thresholdList, config.backgroundModelCount, config.similarityScore, config.familyCountCutOff, config.confidenceScoreCutOff, config.emitRandomLowConfidenceScoreMotifs)
-          // reducebykey + combinebykey
-          val motifs = tools.iterateMotifPairsAndMerge(families, config.mode, config.alignmentBased, config.alphabet, config.maxDegen, config.minMotifLen, config.maxMotifLen, config.thresholdList);
+          val motifs = tools.iterateMotifsAndMerge(families, config.mode, config.alignmentBased, config.alphabet, config.maxDegen, config.minMotifLen, config.maxMotifLen, config.thresholdList);
           motifs.persist(config.persistLevel)
-          val motifsWithBlsCounts = countBlsMergedMotifs(motifs, Math.max(config.minimumPartitionsForSecondStep, config.partitions));
-          val groupedMotifs = groupMotifsWithBlsCount(motifsWithBlsCounts, Math.max(config.minimumPartitionsForSecondStep, config.partitions));
-          processGroups(groupedMotifs, config.thresholdList, config.backgroundModelCount, config.similarityScore, config.familyCountCutOff, config.confidenceScoreCutOff)
+          val motifsWithBlsCounts = countAndCollectdMotifs(motifs, Math.max(config.minimumPartitionsForSecondStep, config.partitions)); // *2);
+          processHashMapGroups(motifsWithBlsCounts, config.thresholdList, config.backgroundModelCount, config.similarityScore, config.familyCountCutOff, config.confidenceScoreCutOff, config.emitRandomLowConfidenceScoreMotifs)
+
+          // reducebykey + combinebykey --> this is very slow! but maybe a bit more memory efficient, maybe...
+          // val motifs = tools.iterateMotifPairsAndMerge(families, config.mode, config.alignmentBased, config.alphabet, config.maxDegen, config.minMotifLen, config.maxMotifLen, config.thresholdList);
+          // motifs.persist(config.persistLevel)
+          // val motifsWithBlsCounts = countBlsMergedMotifs(motifs, Math.max(config.minimumPartitionsForSecondStep, config.partitions));
+          // val groupedMotifs = groupMotifsWithBlsCount(motifsWithBlsCounts, Math.max(config.minimumPartitionsForSecondStep, config.partitions));
+          // processGroups(groupedMotifs, config.thresholdList, config.backgroundModelCount, config.similarityScore, config.familyCountCutOff, config.confidenceScoreCutOff)
         } else {
           val motifs = tools.iterateMotifs(families, config.mode, config.alignmentBased, config.alphabet, config.maxDegen, config.minMotifLen, config.maxMotifLen, config.thresholdList);
           motifs.persist(config.persistLevel)
