@@ -174,8 +174,9 @@ object RDDFunctions {
         logger.info(data.size + " motifs in this group")
         val rnd = new scala.util.Random
         // var starttime = System.nanoTime
-        val bgmodel = generateBackgroundModel(key, backgroundModelCount, similarityScore)
-        val median : BlsVector = oldGetMedianPerThreshold(data, bgmodel, thresholdList.size)
+        // val bgmodel = generateBackgroundModel(key, backgroundModelCount, similarityScore)
+        // val median : BlsVector = oldGetMedianPerThreshold(data, bgmodel, thresholdList.size)
+        val median : BlsVector = getMedianPerThreshold(key, data, thresholdList.size)
         // logger.info("[" + key + " bg model] time (s): "+(System.nanoTime-starttime)/1.0e9)
         // logger.info(dnaToString(key) + " median: " + median)
         // starttime = System.nanoTime
