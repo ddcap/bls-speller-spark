@@ -40,7 +40,8 @@ object BlsSpeller extends Logging {
       useOldIterator: Boolean = false,
       similarityScore: Int = -1,
       emitRandomLowConfidenceScoreMotifs: Int = 0,
-      minimumPartitionsForSecondStep : Int = 8,
+      numPartitionsForSecondStepFactor : Int = 4,
+      minPartitionsForSecondStep: Int = 4,
       backgroundModelCount: Int = -1,
       confidenceScoreCutOff: Double = 0.5,
       thresholdList: List[Float] = List(0.15f, 0.5f, 0.6f, 0.7f, 0.9f, 0.95f),
@@ -198,18 +199,21 @@ object BlsSpeller extends Logging {
     // info("family count: " + familiescount );
 
     if(config.mode == "getMotifs") {
+      val secondStepPartitions = Math.max(config.minPartitionsForSecondStep, config.numPartitionsForSecondStepFactor* config.partitions)
       var output = if(config.useOldIterator)
         {
           val motifs = tools.iterateMotifsOld(families, config.mode, config.alignmentBased, config.alphabet, config.maxDegen, config.minMotifLen, config.maxMotifLen, config.thresholdList);
           motifs.persist(config.persistLevel)
-          val groupedMotifs = groupMotifsByGroup(motifs, config.thresholdList, Math.max(config.minimumPartitionsForSecondStep, config.partitions));
+          val groupedMotifs = groupMotifsByGroup(motifs, config.thresholdList, secondStepPartitions);
           processHashMapGroups(groupedMotifs, config.thresholdList, config.backgroundModelCount, config.similarityScore, config.familyCountCutOff, config.confidenceScoreCutOff, config.emitRandomLowConfidenceScoreMotifs)
         } else if(config.mapSideCombine)
         {
           // combinebykey
           val motifs = tools.iterateMotifsAndMerge(families, config.mode, config.alignmentBased, config.alphabet, config.maxDegen, config.minMotifLen, config.maxMotifLen, config.thresholdList);
           motifs.persist(config.persistLevel)
-          val motifsWithBlsCounts = countAndCollectdMotifs(motifs, Math.max(config.minimumPartitionsForSecondStep, config.partitions)); // *2);
+          val groupCounts = getGroupsWithPermutationCount(motifs)
+          info("groupCounts: " + groupCounts.size)
+          val motifsWithBlsCounts = countAndCollectdMotifs(motifs, groupCounts, secondStepPartitions); // Math.max(config.minimumPartitionsForSecondStep, config.partitions));
           processHashMapGroups(motifsWithBlsCounts, config.thresholdList, config.backgroundModelCount, config.similarityScore, config.familyCountCutOff, config.confidenceScoreCutOff, config.emitRandomLowConfidenceScoreMotifs)
 
           // reducebykey + combinebykey --> this is very slow! but maybe a bit more memory efficient, maybe...
@@ -221,8 +225,8 @@ object BlsSpeller extends Logging {
         } else {
           val motifs = tools.iterateMotifs(families, config.mode, config.alignmentBased, config.alphabet, config.maxDegen, config.minMotifLen, config.maxMotifLen, config.thresholdList);
           motifs.persist(config.persistLevel)
-          val motifsWithBlsCounts = countBls(motifs, config.thresholdList, Math.max(config.minimumPartitionsForSecondStep, config.partitions));
-          val groupedMotifs = groupMotifsWithBlsCount(motifsWithBlsCounts, Math.max(config.minimumPartitionsForSecondStep, config.partitions));
+          val motifsWithBlsCounts = countBls(motifs, config.thresholdList, secondStepPartitions);
+          val groupedMotifs = groupMotifsWithBlsCount(motifsWithBlsCounts, secondStepPartitions);
           processGroups(groupedMotifs, config.thresholdList, config.backgroundModelCount, config.similarityScore, config.familyCountCutOff, config.confidenceScoreCutOff, config.emitRandomLowConfidenceScoreMotifs)
         }
 

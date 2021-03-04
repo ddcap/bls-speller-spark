@@ -50,6 +50,9 @@ object BinaryDnaStringFunctions {
 
   private final val bgCountFactor = 4
   private final val bgCountMinimum = 1000
+  def getNumberOfPermutations(motifgroup: ImmutableDna): Int = {
+    return getNumberOfPermutations(getDnaContent(motifgroup))
+  }
   private def getNumberOfPermutations(chars: ListBuffer[Long]): Int = {
     val charcounts = chars.groupBy(identity).map(x => (x._1, x._2.size))
     var tmp = 1
@@ -155,6 +158,22 @@ object BinaryDnaStringFunctions {
         val k = data.size - nr - 1
         for (i <- 0 until thresholdListSize) {
           arr(i) = findKMedian(data.map(x => x.vector.getThresholdCount(i)), k)
+        }
+      }
+      new BlsVector(arr)
+    }
+  }
+  def getMedianPerThreshold(key: ImmutableDna, data: HashMap[ImmutableDna, BlsVector], thresholdListSize: Int) : BlsVector = {
+    val chars = getDnaContent(key)
+    val perms = getNumberOfPermutations(chars)
+    if(perms == 1) return data.head._2
+    else {
+      val nr = (perms + 1) / 2
+      val arr = Array.fill(thresholdListSize)(0)
+      if(data.size > nr) {
+        val k = data.size - nr - 1
+        for (i <- 0 until thresholdListSize) {
+          arr(i) = findKMedian(data.toSeq.map(_._2.getThresholdCount(i)), k)
         }
       }
       new BlsVector(arr)
