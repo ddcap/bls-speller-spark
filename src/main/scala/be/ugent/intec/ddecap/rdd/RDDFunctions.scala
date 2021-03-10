@@ -74,11 +74,8 @@ object RDDFunctions {
             map1.merged(map2)({
               case ((k,v1:BlsVector),(_,v2:BlsVector)) => (k,v1.addVector(v2))
             })
-          },
-          new DnaStringPartitioner(partitions), mapSideCombine) // mapsidecombine cannot be true with array as key....
+          }, new DnaStringPartitioner(partitions), mapSideCombine)
     }
-
-
 
     def countBls(input: RDD[(ImmutableDnaPair, Byte)], thresholdList: List[Float], partitions: Int, mapSideCombine: Boolean = true) : RDD[(ImmutableDna, ImmutableDnaWithBlsVector)] = {
       input.combineByKey(
@@ -100,14 +97,16 @@ object RDDFunctions {
     }
 
     def countBlsMergedMotifs(input: RDD[(ImmutableDnaPair, BlsVector)], partitions: Int) : RDD[(ImmutableDna, ImmutableDnaWithBlsVector)] = {
-      input.reduceByKey(new DnaStringPartitioner(partitions), (a ,b) => {
-        a.addVector(b)
-        // for (i <- 0 until a.length) {
-        //    a(i) += b(i)
-        //  }
-        //  a
-
-      }).map(x => (x._1.group, ImmutableDnaWithBlsVector(x._1.motif, x._2)) )
+      input.combineByKey(
+            (p: BlsVector) => {
+              p
+            }, (merge:BlsVector, p:BlsVector) => {
+              merge.addVector(p)
+            },
+            (merge1:BlsVector, merge2:BlsVector) => {
+              merge1.addVector(merge2)
+            }, new DnaStringPartitioner(partitions), false)
+          .map(x => (x._1.group, ImmutableDnaWithBlsVector(x._1.motif, x._2)) )
     }
 
     def groupMotifsWithBlsCount(input:  RDD[(ImmutableDna, ImmutableDnaWithBlsVector)], partitions: Int, mapSideCombine: Boolean = true) :  RDD[(ImmutableDna, List[ImmutableDnaWithBlsVector])] = {
@@ -171,7 +170,7 @@ object RDDFunctions {
       input.flatMap(x => { // x is an iterator over the motifs+blsvector in this group
         val key = x._1
         val data = x._2
-        logger.info(data.size + " motifs in this group")
+        // logger.info(data.size + " motifs in this group")
         val rnd = new scala.util.Random
         // var starttime = System.nanoTime
         // val bgmodel = generateBackgroundModel(key, backgroundModelCount, similarityScore)

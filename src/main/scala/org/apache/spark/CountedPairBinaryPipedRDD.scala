@@ -158,7 +158,7 @@ class CountedPairBinaryPipedRDD[T: ClassTag](
     //    group    motif <-- (4 bytes since 2 chars per byte and theres 8 chars)
     // 8 - - - -  - - - -  bls
     val wordSize = (maxMotifLen >> 1)
-    val blscounttypesize = 2;
+    val blscounttypesize = 2; // short
     val totalMotifSize = 2 * wordSize + 2 + blscounttypesize * thresholdListSize // short numbers
     val grp: Array[Byte] = Array.fill(longBytes)(0x0);
     val wrd: Array[Byte] = Array.fill(longBytes)(0x0);

@@ -211,9 +211,7 @@ object BlsSpeller extends Logging {
           // combinebykey
           val motifs = tools.iterateMotifsAndMerge(families, config.mode, config.alignmentBased, config.alphabet, config.maxDegen, config.minMotifLen, config.maxMotifLen, config.thresholdList);
           motifs.persist(config.persistLevel)
-          val groupCounts = getGroupsWithPermutationCount(motifs)
-          info("groupCounts: " + groupCounts.size)
-          val motifsWithBlsCounts = countAndCollectdMotifs(motifs, groupCounts, secondStepPartitions); // Math.max(config.minimumPartitionsForSecondStep, config.partitions));
+          val motifsWithBlsCounts = countAndCollectdMotifs(motifs, secondStepPartitions); // Math.max(config.minimumPartitionsForSecondStep, config.partitions));
           processHashMapGroups(motifsWithBlsCounts, config.thresholdList, config.backgroundModelCount, config.similarityScore, config.familyCountCutOff, config.confidenceScoreCutOff, config.emitRandomLowConfidenceScoreMotifs)
 
           // reducebykey + combinebykey --> this is very slow! but maybe a bit more memory efficient, maybe...

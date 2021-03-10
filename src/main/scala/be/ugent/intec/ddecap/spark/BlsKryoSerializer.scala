@@ -17,6 +17,7 @@ class BlsKryoSerializer extends KryoRegistrator with Logging {
 
   override def registerClasses(kryo: Kryo) {
     kryo.register(classOf[Array[Byte]]);
+    kryo.register(classOf[java.util.HashMap[Long, Int]]);
     kryo.register(classOf[be.ugent.intec.ddecap.dna.BlsVector]);
     kryo.register(classOf[scala.collection.mutable.ListBuffer[(List[Byte], be.ugent.intec.ddecap.dna.BlsVector)]]); //  Array[Int])]]);
     registerByName(kryo, "scala.reflect.ClassTag$GenericClassTag")
