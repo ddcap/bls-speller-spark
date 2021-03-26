@@ -56,7 +56,7 @@ class Tools(val bindir: String) extends Serializable with Logging {
     'Y' -> 'R'
   )
   def getDegenerationMultiplier(in: String) : Int = {
-    info("motif: " + in)
+    // info("motif: " + in)
     var ret = 1
     for (i <- in.size -1 to 0 by -1) {
       ret *= DegenerationTable(in(i))

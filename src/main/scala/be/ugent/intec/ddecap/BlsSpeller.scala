@@ -172,8 +172,8 @@ object BlsSpeller extends Logging {
               c.copy(similarityScore = x) ).text("Uses a similarity score to find the most dissimilar motifs in the background model. 0: Binary diff, 1: Hamming distance, 2: Levenshtein distance, Default is -1 [disabled]."),
             opt[Int]("emitrandommotifs").action( (x, c) =>
               c.copy(emitRandomLowConfidenceScoreMotifs = x) ).text("Emit random motifs below the c score threshold, one in every [int] motifs. Should be a high number, 100 000 or more. ")
-
           )
+          
         cmd("locateMotifs").action( (_, c) => c.copy(mode = "locateMotifs") ).
           text("locates the found motifs in the given Ortho Groups.").
           children(
@@ -234,6 +234,7 @@ object BlsSpeller extends Logging {
         // motifsWithBlsCounts.map(x => LongToDnaString(x._1) + "\t" + LongToDnaString(x._2._1, config.maxMotifLen - 1) + "\t" + x._2._2).saveAsTextFile(config.output);
         // motifs.map(x => (x._1.map(b => toBinary(b, 8)).mkString(" ") + "\t" + x._2._1.map(b => toBinary(b, 8)).mkString(" ") + "\t" + toBinary(x._2._2, 8))).saveAsTextFile(config.output);
       // else
+      // output.map(x => (LongToDnaString(x._4) + "\t" + LongToDnaString(x._1, getDnaLength(x._4)) + "\t" + x._2 + "\t" + x._3.mkString("\t") + "\t")).saveAsTextFile(config.output);
       output.map(x => (LongToDnaString(x._1, getDnaLength(x._4)) + "\t" + x._2 + "\t" + x._3.mkString("\t") + "\t")).saveAsTextFile(config.output);
       // families.unpersist()
 

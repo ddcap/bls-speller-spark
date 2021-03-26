@@ -10,6 +10,7 @@ import be.ugent.intec.ddecap.dna.BlsVectorFunctions._
 import be.ugent.intec.ddecap.dna.BinaryDnaStringFunctions._
 import be.ugent.intec.ddecap.spark.DnaStringPartitioner
 import scala.collection.mutable.ListBuffer
+import be.ugent.intec.ddecap.dna.LongEncodedDna._
 import be.ugent.intec.ddecap.dna.{ImmutableDnaPair, ImmutableDnaWithBlsVectorByte, ImmutableDnaWithBlsVector}
 
 object RDDFunctions {
@@ -56,7 +57,7 @@ object RDDFunctions {
           },
           new DnaStringPartitioner(partitions), mapSideCombine) // mapsidecombine cannot be true with array as key....
     }
-    def countAndCollectdMotifs(input: RDD[(ImmutableDna, ImmutableDnaWithBlsVector)], partitions: Int, mapSideCombine: Boolean = true) : RDD[(ImmutableDna, HashMap[ImmutableDna, BlsVector])] = {
+    def countAndCollectdMotifs(input: RDD[(ImmutableDna, ImmutableDnaWithBlsVector)], partitions: Int) : RDD[(ImmutableDna, HashMap[ImmutableDna, BlsVector])] = {
       // per content group, we collect all motifs, per motif in this group we combine these together by adding the bls vector
       input.combineByKey(
           (p: ImmutableDnaWithBlsVector) => { // convert input value to output value
@@ -74,7 +75,7 @@ object RDDFunctions {
             map1.merged(map2)({
               case ((k,v1:BlsVector),(_,v2:BlsVector)) => (k,v1.addVector(v2))
             })
-          }, new DnaStringPartitioner(partitions), mapSideCombine)
+          }, new DnaStringPartitioner(partitions), false)
     }
 
     def countBls(input: RDD[(ImmutableDnaPair, Byte)], thresholdList: List[Float], partitions: Int, mapSideCombine: Boolean = true) : RDD[(ImmutableDna, ImmutableDnaWithBlsVector)] = {
@@ -130,6 +131,8 @@ object RDDFunctions {
       input.flatMap(x => { // x is group + motifs+blsvector list
         val key = x._1 // motif group (based on character content)
         val data = x._2 // list of motifs with same character content with corresponding blsvector
+        val groupIsItsOwnRC = isGroupItsOwnRc(key);
+        val len = getDnaLength(key)
         // logger.info(data.size + " motifs in this group")
         val rnd = new scala.util.Random
         // val bgmodel = generateBackgroundModel(key, backgroundModelCount, similarityScore)
@@ -154,7 +157,15 @@ object RDDFunctions {
             }
           }
           // logger.info(dnaWithoutLenToString(d._1, key(0)) + " " + d._2 + " " + conf_score_vector.toList)
-          if(thresholds_passed) retlist += ((d.motif, d.vector, conf_score_vector.toList, key))
+          if(thresholds_passed) {
+            if(groupIsItsOwnRC) { // avoid emitting motifs twice in this group
+              if(isRepresentative(d.motif, len)) {
+                retlist += ((d.motif, d.vector, conf_score_vector.toList, key))
+              }
+            } else {
+              retlist += ((d.motif, d.vector, conf_score_vector.toList, key))
+            }
+          }
         }
         // logger.info("[" + key + " filter] time (s): "+(System.nanoTime-starttime)/1.0e9)
         retlist
@@ -169,6 +180,8 @@ object RDDFunctions {
         RDD[(ImmutableDna, BlsVector, List[Float], ImmutableDna)] = {
       input.flatMap(x => { // x is an iterator over the motifs+blsvector in this group
         val key = x._1
+        val groupIsItsOwnRC = isGroupItsOwnRc(key);
+        val len = getDnaLength(key)
         val data = x._2
         // logger.info(data.size + " motifs in this group")
         val rnd = new scala.util.Random
@@ -198,7 +211,15 @@ object RDDFunctions {
             }
           }
           // logger.info(dnaWithoutLenToString(d._1, key(0)) + " " + d._2 + " " + conf_score_vector.toList)
-          if(thresholds_passed) retlist += ((d._1, d._2, conf_score_vector.toList, key))
+          if(thresholds_passed) {
+            if(groupIsItsOwnRC) { // avoid emitting motifs twice in this group
+              if(isRepresentative(d._1, len) || emitRandomLowConfidenceScoreMotifs > 0) {
+                retlist += ((d._1, d._2, conf_score_vector.toList, key))
+              }
+            } else {
+              retlist += ((d._1, d._2, conf_score_vector.toList, key))
+            }
+          }
         }
         // logger.info("[" + key + " filter] time (s): "+(System.nanoTime-starttime)/1.0e9)
         retlist
