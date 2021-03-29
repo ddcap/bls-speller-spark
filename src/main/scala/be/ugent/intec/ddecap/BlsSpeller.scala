@@ -173,7 +173,7 @@ object BlsSpeller extends Logging {
             opt[Int]("emitrandommotifs").action( (x, c) =>
               c.copy(emitRandomLowConfidenceScoreMotifs = x) ).text("Emit random motifs below the c score threshold, one in every [int] motifs. Should be a high number, 100 000 or more. ")
           )
-          
+
         cmd("locateMotifs").action( (_, c) => c.copy(mode = "locateMotifs") ).
           text("locates the found motifs in the given Ortho Groups.").
           children(

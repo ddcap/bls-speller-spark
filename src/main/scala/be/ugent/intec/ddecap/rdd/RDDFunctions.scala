@@ -142,6 +142,7 @@ object RDDFunctions {
         for( d <- data) { // for each motif calculate every F(Ti) and corresponding C(Ti)
           val conf_score_vector = Array.fill(thresholdList.size)(0.0f)
           var thresholds_passed = false;
+          var emit_rnd = false;
           for(t <- 0 until thresholdList.size) {  // for every Threshold Ti:
             val family_count_t = d.vector.getThresholdCount(t) // F(Ti)
             val family_count_bg_t = median.getThresholdCount(t).toFloat
@@ -152,7 +153,7 @@ object RDDFunctions {
             } else {
               if (emitRandomLowConfidenceScoreMotifs > 0 && rnd.nextInt(emitRandomLowConfidenceScoreMotifs) == 0){
                 // logger.info("emitting motif below c threshold " + confidenceScoreCutOff + " for tests.")
-                thresholds_passed = true;
+                emit_rnd = true;
               }
             }
           }
@@ -165,6 +166,8 @@ object RDDFunctions {
             } else {
               retlist += ((d.motif, d.vector, conf_score_vector.toList, key))
             }
+          } else if (emit_rnd) {
+            retlist += ((d.motif, d.vector, conf_score_vector.toList, key))
           }
         }
         // logger.info("[" + key + " filter] time (s): "+(System.nanoTime-starttime)/1.0e9)
@@ -196,6 +199,7 @@ object RDDFunctions {
         for( d <- data) { // for each motif calculate every F(Ti) and corresponding C(Ti)
           val conf_score_vector = Array.fill(thresholdList.size)(0.0f)
           var thresholds_passed = false;
+          var emit_rnd = false;
           for(t <- 0 until thresholdList.size) {  // for every Threshold Ti:
             val family_count_t = d._2.getThresholdCount(t) // F(Ti)
             val family_count_bg_t = median.getThresholdCount(t).toFloat
@@ -206,19 +210,21 @@ object RDDFunctions {
             } else {
               if (emitRandomLowConfidenceScoreMotifs > 0 && rnd.nextInt(emitRandomLowConfidenceScoreMotifs) == 0){
                 // logger.info("emitting motif below c threshold " + confidenceScoreCutOff + " for tests.")
-                thresholds_passed = true;
+                emit_rnd = true;
               }
             }
           }
           // logger.info(dnaWithoutLenToString(d._1, key(0)) + " " + d._2 + " " + conf_score_vector.toList)
           if(thresholds_passed) {
             if(groupIsItsOwnRC) { // avoid emitting motifs twice in this group
-              if(isRepresentative(d._1, len) || emitRandomLowConfidenceScoreMotifs > 0) {
+              if(isRepresentative(d._1, len)) {
                 retlist += ((d._1, d._2, conf_score_vector.toList, key))
               }
             } else {
               retlist += ((d._1, d._2, conf_score_vector.toList, key))
             }
+          } else if (emit_rnd) {
+            retlist += ((d._1, d._2, conf_score_vector.toList, key))
           }
         }
         // logger.info("[" + key + " filter] time (s): "+(System.nanoTime-starttime)/1.0e9)
