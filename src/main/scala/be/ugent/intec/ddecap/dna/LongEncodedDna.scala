@@ -45,7 +45,7 @@ object LongEncodedDna {
     val len = getDnaLength(data); // first byte is length
     var groupcontent :ListBuffer[Char] = ListBuffer.empty[Char];
     for (i <- 0 until len) {
-       groupcontent += byteToAscii((data >> (52 - (4*i)) & 0xf).toInt) 
+       groupcontent += byteToAscii((data >> (52 - (4*i)) & 0xf).toInt)
     }
     val RC = reverseComplement(groupcontent).sorted;
     // logger.info("group\t"  + groupstr  + "\t" + RC + "\t" + groupstr == RC)

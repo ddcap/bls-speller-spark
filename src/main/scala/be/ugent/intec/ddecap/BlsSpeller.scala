@@ -33,6 +33,7 @@ object BlsSpeller extends Logging {
       maxDegen: Int = 4,
       minMotifLen: Int = 8,
       maxMotifLen: Int = 9,
+      minBlsScore: Double = 0.0,
       alphabet: Int = 2, // 0: exact, 1: exact+N, 2: exact+2fold+M, 3: All
       familyCountCutOff: Int = 1,
       onlyiterate: Boolean = false,
@@ -119,11 +120,6 @@ object BlsSpeller extends Logging {
       opt[Double]("conf_cutoff").action( (x, c) =>
         c.copy(confidenceScoreCutOff = x) ).text("Sets the cutoff for confidence scores. Default is 0.5.")
 
-        // currently not implemented in the c++ score! for merged counts...
-        // opt[Int]("max_len").action( (x, c) =>
-        // c.copy(maxMotifLen = x) ).text("Sets the maximum length of a motif, this is not inclusive (i.e. length < maxLength).").required()
-
-
       opt[String]("persist_level").action( (x, c) =>
           x match {
             case "mem_disk" => c.copy(persistLevel = StorageLevel.MEMORY_AND_DISK)
@@ -180,7 +176,16 @@ object BlsSpeller extends Logging {
             opt[String]('m', "motifs").action( (x, c) =>
               c.copy(motifs = x) ).text("Folder with the motifs found by the first step of BLS Speller.").required(),
             opt[String]("fasta").action( (x, c) =>
-              c.copy(fasta = x) ).text("Provide a fasta file with genes and location in the genome. The output will now only be locations in this genome, with the motifs.")
+              c.copy(fasta = x) ).text("Provide a fasta file with genes and location in the genome. The output will now only be locations in this genome, with the motifs."),
+
+          // currently not implemented in the c++ score! for merged counts...
+            opt[Int]("max_len").action( (x, c) =>
+              c.copy(maxMotifLen = x) ).text("Sets the maximum length of a motif, this is not inclusive (i.e. length < maxLength).").required(),
+
+            opt[Double]("min_bls").action( (x, c) =>
+              c.copy(minBlsScore = x) ).text("Min bls score, emit motif locations only with a bls score of at least this value. Default is 0, i.e. no filtering. ")
+
+
 
           )
     }
@@ -250,7 +255,7 @@ object BlsSpeller extends Logging {
       val motifs = tools.loadMotifs(config.motifs, config.partitions, sc, config.thresholdList, config.familyCountCutOff, config.confidenceScoreCutOff);
       val broadcastMotifs = sc.broadcast(motifs.sortBy(identity).collect)
       info("motif count after filter: " + broadcastMotifs.value.size);
-      val motifLocations = tools.locateMotifs(families, config.mode, broadcastMotifs, config.alignmentBased, config.maxDegen, config.maxMotifLen, config.thresholdList);
+      val motifLocations = tools.locateMotifs(families, config.mode, broadcastMotifs, config.alignmentBased, config.maxDegen, config.maxMotifLen, config.thresholdList, config.minBlsScore);
 
       deleteRecursively(config.output)
       if(config.fasta == "") {

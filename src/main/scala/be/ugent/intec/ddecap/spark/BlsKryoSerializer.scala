@@ -25,5 +25,8 @@ class BlsKryoSerializer extends KryoRegistrator with Logging {
     kryo.register(classOf[be.ugent.intec.ddecap.dna.ImmutableDnaPair]);
     kryo.register(classOf[be.ugent.intec.ddecap.dna.ImmutableDnaWithBlsVectorByte]);
     kryo.register(classOf[be.ugent.intec.ddecap.dna.ImmutableDnaWithBlsVector]);
+    kryo.register(scala.reflect.ClassTag(Class.forName("org.apache.spark.util.collection.CompactBuffer")).wrap.runtimeClass)
+    registerByName(kryo, "org.apache.spark.util.collection.CompactBuffer[]")
+    kryo.register(Class.forName("scala.reflect.ManifestFactory$AnyManifest", false, getClass().getClassLoader()));
   }
 }

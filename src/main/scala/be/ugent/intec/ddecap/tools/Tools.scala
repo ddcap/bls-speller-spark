@@ -135,7 +135,7 @@ class Tools(val bindir: String) extends Serializable with Logging {
 
     val geneLocationsInFasta = geneMap.join( motifLocations.map(x => (x._1._1, (x._1._2, x._2) ) ) )
     // returns: [(string, ((string, int,  int), (int,         (string, float))))]
-    //            motif     chr     start end    pos_in_gene  (best motif, bls score)
+    //            geneid     chr     start end    pos_in_gene  (motif, bls score)
     //            _1      _2._1._1  _2._1._2&3  _2._2._1       2._2._2 (._1&2)
     // filter based on the gene list of that fasta file
 
@@ -145,23 +145,25 @@ class Tools(val bindir: String) extends Serializable with Logging {
         if(x._2._2._1 > 0) x._2._1._2 + x._2._2._1 else x._2._1._3 + x._2._2._1 - (maxMotifLen - 1) + 1), // TODO assumes only a single length of motifs are used!!
         (if(x._2._2._1 > 0) x._2._2._2._1 else reverseComplement(x._2._2._2._1), x._2._2._2._2)
         )
-    }).reduceByKey((x, y) => { // merge forward and reverse strand....
-       // keeps only highest scoring motif with lowest degenartion (when multiple motifs at max score)
-      if(x._2 > y._2)
-        x
-      else if (x._2 == y._2)
-        if (getDegenerationMultiplier(x._1) < getDegenerationMultiplier(y._1)) y else x
-      else
-        y
     })
+    // .reduceByKey((x, y) => { // merge forward and reverse strand....
+    //    // keeps only highest scoring motif with lowest degenartion (when multiple motifs at max score)
+    //   if(x._2 > y._2)
+    //     x
+    //   else if (x._2 == y._2)
+    //     if (getDegenerationMultiplier(x._1) < getDegenerationMultiplier(y._1)) y else x
+    //   else
+    //     y
+    // })
   }
 
-  def getCommand(mode: String, alignmentBased: Boolean, thresholdList: List[Float], alphabet: Int, maxDegen: Int, minMotifLen: Int, maxMotifLen: Int, counted : Boolean =  false) : Seq[String] = {
+// TODO split this up in 2 functions
+  def getCommand(mode: String, alignmentBased: Boolean, thresholdList: List[Float], alphabet: Int, maxDegen: Int, minMotifLen: Int, maxMotifLen: Int, minBlsScore: Double, counted : Boolean =  true) : Seq[String] = {
     mode match {
       case "getMotifs" => tokenize( binary + " - " + (if (alignmentBased) AlignmentBasedCommand else AlignmentFreeCommand) + " " + alphabet  + " " +
                            thresholdList.mkString(",") + " " + maxDegen + " " + minMotifLen + " " + maxMotifLen + (if (counted) " true" else ""))
       case "locateMotifs" => tokenize( binary + " - " + (if (alignmentBased) AlignmentBasedCommand else AlignmentFreeCommand) + " " +
-                           thresholdList.mkString(",") + " " + maxDegen + " " + maxMotifLen)
+                           thresholdList.mkString(",") + " " + maxDegen + " " + maxMotifLen + " " + minBlsScore)
       case _ => throw new Exception("invalid Mode")
     }
   }
@@ -180,26 +182,30 @@ class Tools(val bindir: String) extends Serializable with Logging {
   }
 
   def locateMotifs(families: RDD[String], mode: String, motifs: Broadcast[Array[String]], alignmentBased: Boolean,
-    maxDegen: Int, maxMotifLen: Int, thresholdList: List[Float]) : RDD[((String, Int), (String, Float))] = {
+    maxDegen: Int, maxMotifLen: Int, thresholdList: List[Float], minBlsScore: Double, useOnlyBestMotif : Boolean = false) : RDD[((String, Int), (String, Float))] = {
 
     val preppedFamiliesAndMotifs = families.map(x => (x + motifs.value.mkString("\n") + "\n"))
-    val motifWithLocations = preppedFamiliesAndMotifs.pipe(getCommand(mode, alignmentBased, thresholdList, 0, maxDegen, 0, maxMotifLen))
+    val motifWithLocations = preppedFamiliesAndMotifs.pipe(getCommand(mode, alignmentBased, thresholdList, 0, maxDegen, 0, maxMotifLen, minBlsScore))
     val locations = motifWithLocations.flatMap(x => {
       val split = x.split("\t")
       split(2).split(";").map(y => {
         val tmp = y.split("@")
-        ((tmp(0), tmp(1).toInt), (split(0), split(1).toFloat))
+        val rc = reverseComplement(split(0))
+        val rep = if(rc < split(0)) rc else split(0)
+        ((tmp(0), tmp(1).toInt), (rep, split(1).toFloat))
       })
-    }).reduceByKey((x, y) => {
-       // keeps only highest scoring motif with lowest degenartion (when multiple motifs at max score)
-      if(x._2 > y._2)
-        x
-      else if (x._2 == y._2)
-        if (getDegenerationMultiplier(x._1) < getDegenerationMultiplier(y._1)) y else x
-      else
-        y
     })
-    locations
+    if(useOnlyBestMotif)
+      locations.reduceByKey((x, y) => { // keeps only highest scoring motif with lowest degenartion (when multiple motifs at max score)
+        if(x._2 > y._2)
+          x
+        else if (x._2 == y._2)
+          if (getDegenerationMultiplier(x._1) < getDegenerationMultiplier(y._1)) y else x
+        else
+          y
+      })
+    else
+      locations
   }
 
 
@@ -226,7 +232,7 @@ class Tools(val bindir: String) extends Serializable with Logging {
     thresholdList: List[Float]) : RDD[(ImmutableDna, ImmutableDnaWithBlsVectorByte)] = {
 
     (new org.apache.spark.OldBinaryPipedRDD(input, getCommand(mode, alignmentBased, thresholdList, alphabet,
-      maxDegen, minMotifLen, maxMotifLen), "motifIterator", maxMotifLen)).flatMap(identity)
+      maxDegen, minMotifLen, maxMotifLen, 0, false), "motifIterator", maxMotifLen)).flatMap(identity)
   }
 
   def iterateMotifs(input: RDD[String], mode: String, alignmentBased: Boolean, alphabet: Int,
@@ -234,20 +240,20 @@ class Tools(val bindir: String) extends Serializable with Logging {
     thresholdList: List[Float]) : RDD[(ImmutableDnaPair, Byte)] = {
 
     (new org.apache.spark.IteratedBinaryPipedRDD(input, getCommand(mode, alignmentBased, thresholdList, alphabet,
-      maxDegen, minMotifLen, maxMotifLen), "motifIterator", maxMotifLen)).flatMap(identity)
+      maxDegen, minMotifLen, maxMotifLen, 0, false), "motifIterator", maxMotifLen)).flatMap(identity)
   }
 
   def iterateMotifPairsAndMerge(input: RDD[String], mode: String, alignmentBased: Boolean, alphabet: Int,
     maxDegen: Int, minMotifLen: Int, maxMotifLen: Int,
     thresholdList: List[Float]) : RDD[(ImmutableDnaPair, BlsVector)] = {
     (new org.apache.spark.CountedPairBinaryPipedRDD(input, getCommand(mode, alignmentBased, thresholdList, alphabet,
-      maxDegen, minMotifLen, maxMotifLen, true), "motifIterator", maxMotifLen, thresholdList.length))
+      maxDegen, minMotifLen, maxMotifLen, 0, true), "motifIterator", maxMotifLen, thresholdList.length))
   }
   def iterateMotifsAndMerge(input: RDD[String], mode: String, alignmentBased: Boolean, alphabet: Int,
     maxDegen: Int, minMotifLen: Int, maxMotifLen: Int,
     thresholdList: List[Float]) : RDD[(ImmutableDna, ImmutableDnaWithBlsVector)] = {
       (new org.apache.spark.CountedBinaryPipedRDD( input , getCommand(mode, alignmentBased, thresholdList, alphabet,
-        maxDegen, minMotifLen, maxMotifLen, true), "motifIterator", maxMotifLen, thresholdList.length))
+        maxDegen, minMotifLen, maxMotifLen, 0, true), "motifIterator", maxMotifLen, thresholdList.length))
   }
 
 }
